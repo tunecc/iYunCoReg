@@ -5,7 +5,7 @@ console.log('[MultiPage:signup-page] Content script loaded on', location.href);
 
 // Listen for commands from Background
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'EXECUTE_STEP' || message.type === 'FILL_CODE' || message.type === 'STEP8_FIND_AND_CLICK' || message.type === 'WAIT_FOR_SURFACE') {
+  if (message.type === 'EXECUTE_STEP' || message.type === 'FILL_CODE' || message.type === 'STEP8_FIND_AND_CLICK' || message.type === 'WAIT_FOR_SURFACE' || message.type === 'RESEND_VERIFICATION_CODE') {
     resetStopState();
     handleCommand(message).then((result) => {
       sendResponse({ ok: true, ...(result || {}) });
@@ -18,6 +18,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       if (message.type === 'STEP8_FIND_AND_CLICK') {
         log(`Step 8: ${err.message}`, 'error');
+        sendResponse({ error: err.message });
+        return;
+      }
+
+      if (message.type === 'RESEND_VERIFICATION_CODE') {
+        log(`Step ${message.step}: ${err.message}`, 'error');
         sendResponse({ error: err.message });
         return;
       }
@@ -47,6 +53,8 @@ async function handleCommand(message) {
       return await step8_findAndClick();
     case 'WAIT_FOR_SURFACE':
       return await waitForSurfacePayload(message.payload);
+    case 'RESEND_VERIFICATION_CODE':
+      return await resendVerificationCode(message.step, message.payload);
   }
 }
 
@@ -279,6 +287,40 @@ async function fillVerificationCode(step, payload) {
     await humanPause(450, 1200);
     simulateClick(submitBtn);
     log(`Step ${step}: Verification submitted`);
+  }
+}
+
+async function resendVerificationCode(step, payload = {}) {
+  await ensureAuthSurfaceReady(step);
+  log(`Step ${step}: Trying to resend verification code...`);
+
+  const resendBtn = await findVerificationContinueButton(payload.timeout || 10000);
+  await waitForButtonEnabled(resendBtn);
+
+  await humanPause(400, 900);
+  simulateClick(resendBtn);
+  await sleep(1200);
+
+  const resentAt = Date.now();
+  log(`Step ${step}: Verification code resend triggered`);
+  return { resentAt };
+}
+
+async function findVerificationContinueButton(timeout = 10000) {
+  const selector = [
+    'button[type="submit"][name="intent"][value="validate"]',
+    'button[type="submit"][data-dd-action-name="Continue"]',
+    'button[type="submit"]._primary_3rdp0_107',
+  ].join(', ');
+
+  try {
+    return await waitForElement(selector, timeout);
+  } catch {
+    try {
+      return await waitForElementByText('button', /继续|Continue/, Math.max(3000, timeout / 2));
+    } catch {
+      throw new Error('Could not find the resend / continue button on the verification page. URL: ' + location.href);
+    }
   }
 }
 

@@ -1730,6 +1730,83 @@ function normalizeInbucketOrigin(rawValue) {
   }
 }
 
+async function pollVerificationCodeWithAutoResend(options) {
+  const {
+    step,
+    mail,
+    pollPayload,
+    successSelectors,
+    successMessage,
+    resendRounds = 3,
+  } = options;
+
+  let currentFilterAfter = pollPayload.filterAfterTimestamp || 0;
+
+  for (let round = 1; round <= resendRounds; round++) {
+    const currentPayload = {
+      ...pollPayload,
+      filterAfterTimestamp: currentFilterAfter,
+    };
+
+    const result = await sendToContentScript(mail.source, {
+      type: 'POLL_EMAIL',
+      step,
+      source: 'background',
+      payload: currentPayload,
+    });
+
+    if (result?.code) {
+      await setState({ lastEmailTimestamp: result.emailTimestamp || Date.now() });
+      await addLog(`Step ${step}: ${successMessage}: ${result.code}`);
+
+      const signupTabId = await getTabId('signup-page');
+      if (!signupTabId) {
+        throw new Error(`Signup page tab was closed. Cannot fill step ${step} verification code.`);
+      }
+
+      await chrome.tabs.update(signupTabId, { active: true });
+      await sendToContentScript('signup-page', {
+        type: 'FILL_CODE',
+        step,
+        source: 'background',
+        payload: { code: result.code },
+      });
+      await waitForSignupSurface({
+        step,
+        selectors: successSelectors,
+      });
+      return;
+    }
+
+    const pollError = result?.error || `No verification code returned for step ${step}.`;
+    if (round >= resendRounds) {
+      throw new Error(pollError);
+    }
+
+    await addLog(`Step ${step}: No verification email received on round ${round}/${resendRounds}. Trying to resend code...`, 'warn');
+
+    const signupTabId = await getTabId('signup-page');
+    if (!signupTabId) {
+      throw new Error(`Signup page tab was closed. Cannot resend step ${step} verification code.`);
+    }
+
+    await chrome.tabs.update(signupTabId, { active: true });
+    const resendResponse = await sendToContentScript('signup-page', {
+      type: 'RESEND_VERIFICATION_CODE',
+      step,
+      source: 'background',
+      payload: {},
+    });
+
+    if (resendResponse?.error) {
+      throw new Error(resendResponse.error);
+    }
+
+    currentFilterAfter = resendResponse?.resentAt || Date.now();
+    await addLog(`Step ${step}: Resend triggered. Waiting for a fresh verification email...`, 'info');
+  }
+}
+
 async function executeStep4(state) {
   const pollPayload = {
     filterAfterTimestamp: state.flowStartTime || 0,
@@ -1762,45 +1839,19 @@ async function executeStep4(state) {
     });
   }
 
-  const result = await sendToContentScript(mail.source, {
-    type: 'POLL_EMAIL',
+  await pollVerificationCodeWithAutoResend({
     step: 4,
-    source: 'background',
-    payload: pollPayload,
+    mail,
+    pollPayload,
+    successMessage: 'Got verification code',
+    successSelectors: [
+      'input[name="name"]',
+      'input[placeholder*="全名"]',
+      '[role="spinbutton"][data-type="year"]',
+      'input[name="birthday"]',
+      'input[name="age"]',
+    ],
   });
-
-  if (result && result.error) {
-    throw new Error(result.error);
-  }
-
-  if (result && result.code) {
-    await setState({ lastEmailTimestamp: result.emailTimestamp || Date.now() });
-    await addLog(`Step 4: Got verification code: ${result.code}`);
-
-    // Switch to signup tab and fill code
-    const signupTabId = await getTabId('signup-page');
-    if (signupTabId) {
-      await chrome.tabs.update(signupTabId, { active: true });
-      await sendToContentScript('signup-page', {
-        type: 'FILL_CODE',
-        step: 4,
-        source: 'background',
-        payload: { code: result.code },
-      });
-      await waitForSignupSurface({
-        step: 4,
-        selectors: [
-          'input[name="name"]',
-          'input[placeholder*="全名"]',
-          '[role="spinbutton"][data-type="year"]',
-          'input[name="birthday"]',
-          'input[name="age"]',
-        ],
-      });
-    } else {
-      throw new Error('Signup page tab was closed. Cannot fill verification code.');
-    }
-  }
 }
 
 // ============================================================
@@ -1893,43 +1944,17 @@ async function executeStep7(state) {
     });
   }
 
-  const result = await sendToContentScript(mail.source, {
-    type: 'POLL_EMAIL',
+  await pollVerificationCodeWithAutoResend({
     step: 7,
-    source: 'background',
-    payload: pollPayload,
+    mail,
+    pollPayload,
+    successMessage: 'Got login verification code',
+    successSelectors: [
+      'button[type="submit"][data-dd-action-name="Continue"]',
+      'button[type="submit"]._primary_3rdp0_107',
+      'button[aria-label*="Continue"]',
+    ],
   });
-
-  if (result && result.error) {
-    throw new Error(result.error);
-  }
-
-  if (result && result.code) {
-    await setState({ lastEmailTimestamp: result.emailTimestamp || Date.now() });
-    await addLog(`Step 7: Got login verification code: ${result.code}`);
-
-    // Switch to signup/auth tab and fill code
-    const signupTabId = await getTabId('signup-page');
-    if (signupTabId) {
-      await chrome.tabs.update(signupTabId, { active: true });
-      await sendToContentScript('signup-page', {
-        type: 'FILL_CODE',
-        step: 7,
-        source: 'background',
-        payload: { code: result.code },
-      });
-      await waitForSignupSurface({
-        step: 7,
-        selectors: [
-          'button[type="submit"][data-dd-action-name="Continue"]',
-          'button[type="submit"]._primary_3rdp0_107',
-          'button[aria-label*="Continue"]',
-        ],
-      });
-    } else {
-      throw new Error('Auth page tab was closed. Cannot fill verification code.');
-    }
-  }
 }
 
 // ============================================================
