@@ -71,9 +71,12 @@ async function handleStep(step, payload) {
 function checkOauthTimeoutStatus() {
   const statusEl = document.querySelector('.status-badge, [class*="status"]');
   const statusText = (statusEl?.textContent || '').replace(/\s+/g, ' ').trim();
+  const waiting = /等待认证中|waiting for auth|waiting for authentication/i.test(statusText);
   const timedOut = /timeout waiting for oauth callback/i.test(statusText);
 
-  if (timedOut) {
+  if (waiting) {
+    log(`CPA Auth status indicates authentication is still in progress: ${statusText}`);
+  } else if (timedOut) {
     log(`CPA Auth status indicates OAuth timeout: ${statusText}`, 'warn');
   } else if (statusText) {
     log(`CPA Auth current status: ${statusText}`);
@@ -83,6 +86,7 @@ function checkOauthTimeoutStatus() {
 
   return {
     timedOut,
+    waiting,
     statusText,
     url: location.href,
   };

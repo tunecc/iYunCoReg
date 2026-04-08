@@ -2066,6 +2066,15 @@ async function executeStep7(state) {
 
 let webNavListener = null;
 
+function isLocalCallbackUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 async function executeStep8(state) {
   if (!state.oauthUrl) {
     throw new Error('No OAuth URL. Complete step 1 first.');
@@ -2094,21 +2103,28 @@ async function executeStep8(state) {
     }, 120000);
 
     webNavListener = (details) => {
-      if (details.url.startsWith('http://localhost')) {
-        console.log(LOG_PREFIX, `Captured localhost redirect: ${details.url}`);
-        resolved = true;
-        cleanupListener();
-        clearTimeout(timeout);
-        if (resolveCaptureWait) resolveCaptureWait(details.url);
+      if (!isLocalCallbackUrl(details.url) || resolved) {
+        return;
+      }
 
-        setState({ localhostUrl: details.url }).then(() => {
-          addLog(`Step 8: Captured localhost URL: ${details.url}`, 'ok');
-          setStepStatus(8, 'completed');
+      resolved = true;
+      console.log(LOG_PREFIX, `Captured localhost redirect: ${details.url}`);
+      cleanupListener();
+      clearTimeout(timeout);
+      if (resolveCaptureWait) resolveCaptureWait(details.url);
+
+      (async () => {
+        try {
+          await setState({ localhostUrl: details.url });
+          await addLog(`Step 8: Captured localhost URL: ${details.url}`, 'ok');
+          await setStepStatus(8, 'completed');
           notifyStepComplete(8, { localhostUrl: details.url });
           broadcastDataUpdate({ localhostUrl: details.url });
           resolve();
-        });
-      }
+        } catch (err) {
+          reject(err);
+        }
+      })();
     };
 
     chrome.webNavigation.onBeforeNavigate.addListener(webNavListener);
