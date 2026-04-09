@@ -48,6 +48,7 @@ const DEFAULT_STATE = {
   logs: [],
   vpsUrl: '',
   customPassword: '',
+  preferredIcloudHost: '',
   mailProvider: '163', // 'qq', '163', 'gmail', or 'inbucket'
   mailPollMaxAttempts: 20,
   mailPollIntervalMs: 3000,
@@ -314,6 +315,39 @@ function getErrorMessage(error) {
   return String(error?.message || error || 'Unknown error');
 }
 
+function normalizeIcloudHost(rawHost) {
+  const host = String(rawHost || '').trim().toLowerCase();
+  if (!host) return '';
+  if (host === 'icloud.com' || host === 'www.icloud.com' || host === 'setup.icloud.com') return 'icloud.com';
+  if (host === 'icloud.com.cn' || host === 'www.icloud.com.cn' || host === 'setup.icloud.com.cn') return 'icloud.com.cn';
+  return '';
+}
+
+function getIcloudLoginUrlForHost(host) {
+  const normalizedHost = normalizeIcloudHost(host);
+  if (normalizedHost === 'icloud.com') return 'https://www.icloud.com/';
+  if (normalizedHost === 'icloud.com.cn') return 'https://www.icloud.com.cn/';
+  return '';
+}
+
+function getIcloudSetupUrlForHost(host) {
+  const normalizedHost = normalizeIcloudHost(host);
+  if (normalizedHost === 'icloud.com') return 'https://setup.icloud.com/setup/ws/1';
+  if (normalizedHost === 'icloud.com.cn') return 'https://setup.icloud.com.cn/setup/ws/1';
+  return '';
+}
+
+function getIcloudHostHintFromMessage(message) {
+  const lower = String(message || '').toLowerCase();
+  if (lower.includes('setup.icloud.com.cn') || lower.includes('www.icloud.com.cn') || lower.includes('icloud.com.cn')) {
+    return 'icloud.com.cn';
+  }
+  if (lower.includes('setup.icloud.com') || lower.includes('www.icloud.com') || lower.includes('icloud.com')) {
+    return 'icloud.com';
+  }
+  return '';
+}
+
 function isIcloudLoginRequiredError(error) {
   const message = getErrorMessage(error).toLowerCase();
   return message.includes('could not validate icloud session')
@@ -321,12 +355,64 @@ function isIcloudLoginRequiredError(error) {
     || /\bstatus (401|403|409|421)\b/.test(message);
 }
 
-function getPreferredIcloudLoginUrl(error) {
-  const message = getErrorMessage(error).toLowerCase();
-  if (message.includes('icloud.com/setup') && !message.includes('icloud.com.cn/setup')) {
+async function getOpenIcloudHostPreference() {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [
+        'https://www.icloud.com/*',
+        'https://www.icloud.com.cn/*',
+      ],
+    });
+
+    const activeTab = tabs.find(tab => tab.active);
+    const candidates = activeTab ? [activeTab, ...tabs.filter(tab => tab.id !== activeTab.id)] : tabs;
+
+    for (const tab of candidates) {
+      try {
+        const host = normalizeIcloudHost(new URL(tab.url).host);
+        if (host) return host;
+      } catch {}
+    }
+  } catch {}
+
+  return '';
+}
+
+async function getPreferredIcloudLoginUrl(error, state = null) {
+  const messageHint = getIcloudHostHintFromMessage(getErrorMessage(error));
+  if (messageHint) {
+    return getIcloudLoginUrlForHost(messageHint);
+  }
+
+  const currentState = state || await getState();
+  const savedHost = normalizeIcloudHost(currentState?.preferredIcloudHost);
+  if (savedHost) {
+    return getIcloudLoginUrlForHost(savedHost);
+  }
+
+  const openHost = await getOpenIcloudHostPreference();
+  if (openHost) {
+    return getIcloudLoginUrlForHost(openHost);
+  }
+
+  if (currentState?.language === 'en-US') {
     return 'https://www.icloud.com/';
   }
+
   return 'https://www.icloud.com.cn/';
+}
+
+async function getPreferredIcloudSetupUrls(state = null, error = null) {
+  const preferredLoginUrl = await getPreferredIcloudLoginUrl(error, state);
+  const preferredHost = normalizeIcloudHost(new URL(preferredLoginUrl).host);
+  const preferredSetupUrl = getIcloudSetupUrlForHost(preferredHost);
+
+  if (!preferredSetupUrl) return [...ICLOUD_SETUP_URLS];
+
+  return [
+    preferredSetupUrl,
+    ...ICLOUD_SETUP_URLS.filter(url => url !== preferredSetupUrl),
+  ];
 }
 
 let lastIcloudLoginPromptAt = 0;
@@ -344,7 +430,7 @@ async function openIcloudLoginPage(preferredUrl) {
     } catch {
       return false;
     }
-  }) || tabs[0];
+  });
 
   if (existing?.id) {
     await chrome.tabs.update(existing.id, { active: true });
@@ -360,7 +446,7 @@ async function openIcloudLoginPage(preferredUrl) {
 
 async function promptIcloudLogin(error, actionLabel = 'iCloud action') {
   const now = Date.now();
-  const preferredUrl = getPreferredIcloudLoginUrl(error);
+  const preferredUrl = await getPreferredIcloudLoginUrl(error);
   const originalError = getErrorMessage(error);
 
   chrome.runtime.sendMessage({
@@ -441,10 +527,16 @@ async function validateIcloudSession(setupUrl) {
 
 async function resolveIcloudPremiumMailService() {
   const errors = [];
+  const state = await getState();
+  const setupUrls = await getPreferredIcloudSetupUrls(state);
 
-  for (const setupUrl of ICLOUD_SETUP_URLS) {
+  for (const setupUrl of setupUrls) {
     try {
       const data = await validateIcloudSession(setupUrl);
+      const preferredIcloudHost = normalizeIcloudHost(new URL(setupUrl).host);
+      if (preferredIcloudHost && preferredIcloudHost !== normalizeIcloudHost(state.preferredIcloudHost)) {
+        await setState({ preferredIcloudHost });
+      }
       return {
         setupUrl,
         serviceUrl: String(data.webservices.premiummailsettings.url).replace(/\/$/, ''),
@@ -701,6 +793,7 @@ async function resetState() {
       'vpsUrl',
       'autoDeleteUsedIcloudAlias',
       'customPassword',
+      'preferredIcloudHost',
       'mailProvider',
       'mailPollMaxAttempts',
       'mailPollIntervalMs',
@@ -727,6 +820,7 @@ async function resetState() {
     vpsUrl: prev.vpsUrl || '',
     autoDeleteUsedIcloudAlias: Boolean(prev.autoDeleteUsedIcloudAlias),
     customPassword: prev.customPassword || '',
+    preferredIcloudHost: prev.preferredIcloudHost || '',
     mailProvider: prev.mailProvider || '163',
     mailPollMaxAttempts: Number(prev.mailPollMaxAttempts) || 20,
     mailPollIntervalMs: Number(prev.mailPollIntervalMs) || 3000,
