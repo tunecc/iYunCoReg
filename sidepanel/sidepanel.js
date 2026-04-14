@@ -125,7 +125,7 @@ const I18N = {
     mailProviderQq: 'QQ 邮箱 (wx.mail.qq.com)',
     mailProviderGmail: 'Gmail (mail.google.com)',
     mailProviderInbucket: 'Inbucket（自定义主机）',
-    placeholderCpaAuth: 'CPA: http://ip:port/management.html#/oauth 或 Sub2API: https://host/admin/accounts',
+    placeholderCpaAuth: '填写 Sub2API 或 CPA 链接',
     placeholderInbucketHost: '你的 inbucket 主机或 https://你的主机',
     placeholderInbucketMailbox: '例如 zju2001',
     placeholderMailPollAttempts: '次数，例如 20',
@@ -179,6 +179,7 @@ const I18N = {
     statusReady: '就绪',
     autoHintEmail: '使用 Auto 生成 iCloud 别名，或手动粘贴后继续',
     autoHintError: '自动运行被错误中断。修复问题或跳过失败步骤后继续',
+    invalidAuthUrlFormat: '链接格式错误，请填写 CPA 或 Sub2API 链接',
     fetchedEmail: ({ email }) => `已获取 ${email}`,
     autoFetchFailed: ({ message }) => `自动获取失败：${message}`,
     icloudSummaryInitial: '加载你的 Hide My Email 别名以便在这里管理。',
@@ -278,7 +279,7 @@ const I18N = {
     mailProviderQq: 'QQ Mail (wx.mail.qq.com)',
     mailProviderGmail: 'Gmail (mail.google.com)',
     mailProviderInbucket: 'Inbucket (custom host)',
-    placeholderCpaAuth: 'CPA: http://ip:port/management.html#/oauth or Sub2API: https://host/admin/accounts',
+    placeholderCpaAuth: 'Enter a Sub2API or CPA URL',
     placeholderInbucketHost: 'your inbucket host or https://your-host',
     placeholderInbucketMailbox: 'e.g. zju2001',
     placeholderMailPollAttempts: 'Attempts, e.g. 20',
@@ -332,6 +333,7 @@ const I18N = {
     statusReady: 'Ready',
     autoHintEmail: 'Use Auto to generate an iCloud alias, or paste manually, then continue',
     autoHintError: 'Auto run was interrupted by an error. Fix it or skip the failed step, then continue',
+    invalidAuthUrlFormat: 'Invalid URL format. Enter a CPA or Sub2API URL.',
     fetchedEmail: ({ email }) => `Fetched ${email}`,
     autoFetchFailed: ({ message }) => `Auto fetch failed: ${message}`,
     icloudSummaryInitial: 'Load your Hide My Email aliases to manage them here.',
@@ -473,13 +475,60 @@ function applyLanguage(language) {
 
 async function saveVpsUrlValue(value) {
   const vpsUrl = String(value || '').trim();
-  inputVpsUrl.value = vpsUrl;
-  if (!vpsUrl) return;
+  const normalizedVpsUrl = normalizeAuthPanelUrl(vpsUrl);
+  if (!vpsUrl) {
+    inputVpsUrl.value = '';
+    await chrome.runtime.sendMessage({
+      type: 'SAVE_SETTING',
+      source: 'sidepanel',
+      payload: { vpsUrl: '' },
+    });
+    return true;
+  }
+
+  if (!normalizedVpsUrl) {
+    inputVpsUrl.value = '';
+    await chrome.runtime.sendMessage({
+      type: 'SAVE_SETTING',
+      source: 'sidepanel',
+      payload: { vpsUrl: '' },
+    });
+    showToast(t('invalidAuthUrlFormat'), 'error');
+    return false;
+  }
+
+  inputVpsUrl.value = normalizedVpsUrl;
   await chrome.runtime.sendMessage({
     type: 'SAVE_SETTING',
     source: 'sidepanel',
-    payload: { vpsUrl },
+    payload: { vpsUrl: normalizedVpsUrl },
   });
+  return true;
+}
+
+function normalizeAuthPanelUrl(value) {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) return '';
+
+  let parsed;
+  try {
+    parsed = new URL(rawValue);
+  } catch {
+    return '';
+  }
+
+  const path = parsed.pathname.replace(/\/+$/, '');
+  const hash = parsed.hash || '';
+  const isSub2api = parsed.protocol === 'https:' && path === '/admin/accounts' && !hash;
+  const isCpa = (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+    && path === '/management.html'
+    && hash === '#/oauth';
+
+  if (!isSub2api && !isCpa) {
+    return '';
+  }
+
+  return parsed.toString();
 }
 
 async function copyTextValue(value, kind) {
@@ -508,8 +557,10 @@ async function pasteCpaAuthFromClipboard(options = {}) {
       showToast(t('clipboardEmpty'), 'warn');
       return;
     }
-    await saveVpsUrlValue(text);
-    showToast(t('pastedCpaAuth'), 'success', 2000);
+    const saved = await saveVpsUrlValue(text);
+    if (saved) {
+      showToast(t('pastedCpaAuth'), 'success', 2000);
+    }
   } catch (err) {
     showToast(t('pasteFailed', { message: err.message || err }), 'warn');
   }
@@ -1462,10 +1513,7 @@ inputEmail.addEventListener('change', async () => {
 });
 
 inputVpsUrl.addEventListener('change', async () => {
-  const vpsUrl = inputVpsUrl.value.trim();
-  if (vpsUrl) {
-    await chrome.runtime.sendMessage({ type: 'SAVE_SETTING', source: 'sidepanel', payload: { vpsUrl } });
-  }
+  await saveVpsUrlValue(inputVpsUrl.value);
 });
 
 inputVpsUrl.addEventListener('click', async () => {

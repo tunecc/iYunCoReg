@@ -5,7 +5,7 @@ console.log('[MultiPage:signup-page] Content script loaded on', location.href);
 
 // Listen for commands from Background
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'EXECUTE_STEP' || message.type === 'FILL_CODE' || message.type === 'STEP8_FIND_AND_CLICK' || message.type === 'WAIT_FOR_SURFACE' || message.type === 'RESEND_VERIFICATION_CODE') {
+  if (message.type === 'EXECUTE_STEP' || message.type === 'FILL_CODE' || message.type === 'STEP8_FIND_AND_CLICK' || message.type === 'WAIT_FOR_SURFACE' || message.type === 'RESEND_VERIFICATION_CODE' || message.type === 'CHECK_PAGE_RECOVERY_STATE') {
     resetStopState();
     handleCommand(message).then((result) => {
       sendResponse({ ok: true, ...(result || {}) });
@@ -55,7 +55,31 @@ async function handleCommand(message) {
       return await waitForSurfacePayload(message.payload);
     case 'RESEND_VERIFICATION_CODE':
       return await resendVerificationCode(message.step, message.payload);
+    case 'CHECK_PAGE_RECOVERY_STATE':
+      return getPageRecoveryState();
   }
+}
+
+function getPageRecoveryState() {
+  const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+  const hasOopsHeading = /糟糕，出错了|something went wrong/i.test(bodyText);
+  const hasOperationTimedOut = /operation timed out/i.test(bodyText);
+
+  if (hasOopsHeading && hasOperationTimedOut) {
+    return {
+      recoverable: true,
+      type: 'operation_timed_out',
+      message: 'Operation timed out',
+      url: location.href,
+    };
+  }
+
+  return {
+    recoverable: false,
+    type: '',
+    message: '',
+    url: location.href,
+  };
 }
 
 async function ensureAuthSurfaceReady(step, timeout = 15000) {
@@ -478,8 +502,18 @@ async function step8_findAndClick() {
   await ensureAuthSurfaceReady(8);
   log('Step 8: Looking for OAuth consent "继续" button...');
 
+  const phoneRequiredError = findStep8BlockingError();
+  if (phoneRequiredError) {
+    throw new Error(`${phoneRequiredError}。请更换环境重试。`);
+  }
+
   const continueBtn = await findContinueButton();
   await waitForButtonEnabled(continueBtn);
+
+  const phoneRequiredErrorAfterButton = findStep8BlockingError();
+  if (phoneRequiredErrorAfterButton) {
+    throw new Error(`${phoneRequiredErrorAfterButton}。请更换环境重试。`);
+  }
 
   await humanPause(350, 900);
   continueBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -493,6 +527,25 @@ async function step8_findAndClick() {
     buttonText: (continueBtn.textContent || '').trim(),
     url: location.href,
   };
+}
+
+function findStep8BlockingError() {
+  const candidates = Array.from(document.querySelectorAll([
+    'h1',
+    '[role="alert"]',
+    '[aria-live="polite"]',
+    '[class*="error"]',
+  ].join(', ')));
+
+  for (const node of candidates) {
+    const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    if (/电话号码是必填项|phone number is required|required phone number/i.test(text)) {
+      return text;
+    }
+  }
+
+  return '';
 }
 
 async function findContinueButton() {
