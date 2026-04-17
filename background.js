@@ -2556,6 +2556,12 @@ async function pollVerificationCodeWithAutoResend(options) {
   }
 }
 
+const STEP7_SUCCESS_SELECTORS = [
+  'button[type="submit"][data-dd-action-name="Continue"]',
+  'button[type="submit"]._primary_3rdp0_107',
+  'button[aria-label*="Continue" i]',
+];
+
 async function executeStep4(state) {
   const mailPollConfig = getMailPollConfig(state);
   const pollPayload = {
@@ -2854,11 +2860,7 @@ async function executeStep7(state) {
       mail,
       pollPayload,
       successMessage: 'Got login verification code',
-      successSelectors: [
-        'button[type="submit"][data-dd-action-name="Continue"]',
-        'button[type="submit"]._primary_3rdp0_107',
-        'button[aria-label*="Continue" i]',
-      ],
+      successSelectors: STEP7_SUCCESS_SELECTORS,
       resendRounds: mailPollConfig.resendRounds,
       beforeResend: async () => {
         await refreshOAuthIfTimedOutBeforeStep7Resend();

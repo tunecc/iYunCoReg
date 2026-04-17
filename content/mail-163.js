@@ -17,32 +17,6 @@ if (!isTopFrame) {
   console.log(MAIL163_PREFIX, 'Skipping child frame');
 } else {
 
-// Track codes we've already seen — persisted in chrome.storage.session to survive script re-injection
-let seenCodes = new Set();
-
-async function loadSeenCodes() {
-  try {
-    const data = await chrome.storage.session.get('seenCodes');
-    if (data.seenCodes && Array.isArray(data.seenCodes)) {
-      seenCodes = new Set(data.seenCodes);
-      console.log(MAIL163_PREFIX, `Loaded ${seenCodes.size} previously seen codes`);
-    }
-  } catch (err) {
-    console.warn(MAIL163_PREFIX, 'Session storage unavailable, using in-memory seen codes:', err?.message || err);
-  }
-}
-
-// Load previously seen codes on startup
-loadSeenCodes();
-
-async function persistSeenCodes() {
-  try {
-    await chrome.storage.session.set({ seenCodes: [...seenCodes] });
-  } catch (err) {
-    console.warn(MAIL163_PREFIX, 'Could not persist seen codes, continuing in-memory only:', err?.message || err);
-  }
-}
-
 // ============================================================
 // Message Handler (top frame only)
 // ============================================================
@@ -542,9 +516,7 @@ async function handlePollEmail(step, payload) {
 
       if (senderMatch || subjectMatch) {
         const code = await extractCodeFromMailItem(item, step, meta);
-        if (code && !seenCodes.has(code)) {
-          seenCodes.add(code);
-          persistSeenCodes();
+        if (code) {
           const source = useFallback && existingMailIds.has(id) ? 'fallback' : 'new';
           log(`Step ${step}: Code found: ${code} (${source}, subject: ${meta.subject.slice(0, 40)})`, 'ok');
 
@@ -554,8 +526,6 @@ async function handlePollEmail(step, payload) {
           await sleep(1000);
 
           return { ok: true, code, emailTimestamp: Date.now(), mailId: id };
-        } else if (code && seenCodes.has(code)) {
-          log(`Step ${step}: Skipping already-seen code: ${code}`, 'info');
         }
       }
     }
