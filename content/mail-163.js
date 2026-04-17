@@ -70,7 +70,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // ============================================================
 
 function findMailItems() {
-  return document.querySelectorAll('div[sign="letter"]');
+  const visibleListModules = [...document.querySelectorAll('div[id^="_dvModuleContainer_mbox.ListModule_"]')]
+    .filter(isElementVisible);
+
+  for (const moduleEl of visibleListModules) {
+    const scopedItems = [...moduleEl.querySelectorAll('div[sign="letter"]')]
+      .filter(isElementVisible);
+    if (scopedItems.length > 0) {
+      return scopedItems;
+    }
+  }
+
+  const visibleItems = [...document.querySelectorAll('div[sign="letter"]')]
+    .filter(isElementVisible);
+  if (visibleItems.length > 0) {
+    return visibleItems;
+  }
+
+  return [...document.querySelectorAll('div[sign="letter"]')];
 }
 
 function getCurrentMailIds() {
@@ -118,10 +135,20 @@ function getMailItemMeta(item) {
     titleTexts.join(' '),
   ].join(' '));
 
+  const routingText = normalizeText([
+    ariaLabel,
+    itemText,
+    titleTexts.join(' '),
+  ].join(' '));
+  const hasIncomingHints = /(发件人|代发|\bfrom\b|\bsender\b)/i.test(routingText);
+  const hasOutgoingHints = /(收件人|发送成功|再次编辑发送|\brecipient\b|\bsent\b)/i.test(routingText);
+  const direction = hasOutgoingHints && !hasIncomingHints ? 'outgoing' : 'incoming';
+
   return {
     sender,
     subject,
     combinedText,
+    direction,
   };
 }
 
@@ -505,6 +532,10 @@ async function handlePollEmail(step, payload) {
       if (!useFallback && existingMailIds.has(id)) continue;
 
       const meta = getMailItemMeta(item);
+      if (meta.direction === 'outgoing') {
+        continue;
+      }
+
       const combinedLower = meta.combinedText.toLowerCase();
       const senderMatch = senderFilters.some(f => combinedLower.includes(String(f || '').toLowerCase()));
       const subjectMatch = subjectFilters.some(f => combinedLower.includes(String(f || '').toLowerCase()));
