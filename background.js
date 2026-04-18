@@ -1749,6 +1749,9 @@ function getAutoStepDelay(step) {
 async function waitForSignupSurface(payload, timeout = 20000) {
   const startedAt = Date.now();
   let lastError = null;
+  const perAttemptTimeout = payload?.step === 4
+    ? Math.min(25000, timeout)
+    : Math.min(5000, timeout);
 
   while (Date.now() - startedAt < timeout) {
     throwIfStopped();
@@ -1762,7 +1765,7 @@ async function waitForSignupSurface(payload, timeout = 20000) {
         type: 'WAIT_FOR_SURFACE',
         source: 'background',
         payload: {
-          timeout: Math.min(5000, timeout),
+          timeout: perAttemptTimeout,
           ...payload,
         },
       });
