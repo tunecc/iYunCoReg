@@ -15,6 +15,12 @@ const STOP_ERROR_MESSAGE = 'Flow stopped by user.';
 const HUMAN_STEP_DELAY_MIN = 700;
 const HUMAN_STEP_DELAY_MAX = 2200;
 const PERSISTENT_ALIAS_STATE_KEYS = ['accounts', 'manualAliasUsage', 'preservedAliases'];
+// 自用默认值集中在这里，后续同步上游时尽量只维护这一小段。
+const SELF_USE_DEFAULTS = Object.freeze({
+  vpsUrl: 'http://127.0.0.1:8317/management.html#/oauth',
+  icloudHostPreference: 'icloud.com',
+  mailProvider: 'gmail',
+});
 
 initializeSessionStorageAccess();
 initializePersistentAliasState();
@@ -50,11 +56,11 @@ const DEFAULT_STATE = {
   flowStartTime: null,
   tabRegistry: {},
   logs: [],
-  vpsUrl: '',
+  vpsUrl: SELF_USE_DEFAULTS.vpsUrl,
   customPassword: '',
-  icloudHostPreference: 'auto',
+  icloudHostPreference: SELF_USE_DEFAULTS.icloudHostPreference,
   preferredIcloudHost: '',
-  mailProvider: '163', // 'qq', '163', 'gmail', or 'inbucket'
+  mailProvider: SELF_USE_DEFAULTS.mailProvider, // 'qq', '163', 'gmail', or 'inbucket'
   qqMailDomain: 'standard', // 'standard' or 'enterprise'
   mailPollMaxAttempts: 20,
   mailPollIntervalMs: 3000,
@@ -848,14 +854,14 @@ async function resetState() {
       : {},
     tabRegistry: prev.tabRegistry || {},
     language: prev.language || 'zh-CN',
-    vpsUrl: prev.vpsUrl || '',
+    vpsUrl: prev.vpsUrl || SELF_USE_DEFAULTS.vpsUrl,
     autoDeleteUsedIcloudAlias: Boolean(prev.autoDeleteUsedIcloudAlias),
     forceRefreshOAuthBeforeStep6: Boolean(prev.forceRefreshOAuthBeforeStep6),
     allowSameStep4AndStep7Code: Boolean(prev.allowSameStep4AndStep7Code),
     customPassword: prev.customPassword || '',
-    icloudHostPreference: prev.icloudHostPreference || 'auto',
+    icloudHostPreference: prev.icloudHostPreference || SELF_USE_DEFAULTS.icloudHostPreference,
     preferredIcloudHost: prev.preferredIcloudHost || '',
-    mailProvider: prev.mailProvider || '163',
+    mailProvider: prev.mailProvider || SELF_USE_DEFAULTS.mailProvider,
     qqMailDomain: prev.qqMailDomain || 'standard',
     mailPollMaxAttempts: Number(prev.mailPollMaxAttempts) || 20,
     mailPollIntervalMs: Number(prev.mailPollIntervalMs) || 3000,
