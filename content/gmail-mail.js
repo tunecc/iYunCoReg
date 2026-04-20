@@ -399,7 +399,7 @@ async function handlePollEmail(step, payload) {
     subjectFilters = [],
     intervalMs = 3000,
   } = payload || {};
-  const pollWindowMs = 25000;
+  const pollWindowMs = 30000;
   const refreshWaitMs = Math.max(1500, Math.min(intervalMs, 4000));
 
   log(

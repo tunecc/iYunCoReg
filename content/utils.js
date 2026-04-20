@@ -291,7 +291,66 @@ function reportError(step, errorMessage) {
  */
 function simulateClick(el) {
   throwIfStopped();
-  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  if (!el) {
+    throw new Error('simulateClick target is missing.');
+  }
+
+  try {
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  } catch {
+    try {
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+    } catch {}
+  }
+
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    try {
+      el.focus();
+    } catch {}
+  }
+
+  const eventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    button: 0,
+    buttons: 1,
+  };
+
+  const dispatchMouse = (type, overrides = {}) => {
+    el.dispatchEvent(new MouseEvent(type, { ...eventInit, ...overrides }));
+  };
+
+  const dispatchPointer = (type, overrides = {}) => {
+    if (typeof PointerEvent !== 'function') return;
+    el.dispatchEvent(new PointerEvent(type, {
+      ...eventInit,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+      ...overrides,
+    }));
+  };
+
+  dispatchPointer('pointerover', { buttons: 0 });
+  dispatchMouse('mouseover', { buttons: 0 });
+  dispatchPointer('pointerenter', { buttons: 0 });
+  dispatchMouse('mouseenter', { buttons: 0 });
+  dispatchPointer('pointermove', { buttons: 0 });
+  dispatchMouse('mousemove', { buttons: 0 });
+  dispatchPointer('pointerdown');
+  dispatchMouse('mousedown');
+  dispatchPointer('pointerup', { buttons: 0 });
+  dispatchMouse('mouseup', { buttons: 0 });
+
+  if (typeof el.click === 'function') {
+    el.click();
+  } else {
+    dispatchMouse('click', { buttons: 0 });
+  }
   console.log(LOG_PREFIX, `Clicked: ${el.tagName} ${el.textContent?.slice(0, 30) || ''}`);
   log(`Clicked [${el.tagName}] "${el.textContent?.trim().slice(0, 30) || ''}"`);
 }
