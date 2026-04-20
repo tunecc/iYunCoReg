@@ -12,6 +12,7 @@ const ICLOUD_LOGIN_URLS = [
   'https://www.icloud.com/',
 ];
 const STOP_ERROR_MESSAGE = 'Flow stopped by user.';
+const STEP_SKIP_ERROR_PATTERN = /^Step (\d+) skipped by user\.$/;
 const HUMAN_STEP_DELAY_MIN = 700;
 const HUMAN_STEP_DELAY_MAX = 2200;
 const PERSISTENT_ALIAS_STATE_KEYS = ['accounts', 'manualAliasUsage', 'preservedAliases'];
@@ -1247,11 +1248,33 @@ async function skipStep(step) {
   const state = await getState();
   const currentStatus = state.stepStatuses?.[stepNum] || 'pending';
   if (currentStatus === 'running') {
-    throw new Error(`Cannot skip step ${stepNum} while it is running.`);
+    skipRequestedSteps.add(stepNum);
+    await setStepStatus(stepNum, 'skipped');
+    await addLog(`Step ${stepNum} skip requested by user. Interrupting current work...`, 'warn');
+    await broadcastStopToContentScripts();
+    await interruptStep(stepNum, getStepSkipErrorMessage(stepNum));
+    notifyStepSkipped(stepNum);
+    return;
   }
 
   await setStepStatus(stepNum, 'skipped');
   await addLog(`Step ${stepNum} skipped by user`, 'warn');
+}
+
+function getStepSkipErrorMessage(step) {
+  return `Step ${step} skipped by user.`;
+}
+
+function getStepSkipErrorStep(error) {
+  const message = typeof error === 'string' ? error : error?.message;
+  const match = String(message || '').match(STEP_SKIP_ERROR_PATTERN);
+  if (!match) return 0;
+  const step = Number(match[1]);
+  return Number.isInteger(step) ? step : 0;
+}
+
+function isStepSkipError(error) {
+  return getStepSkipErrorStep(error) > 0;
 }
 
 function isStopError(error) {
@@ -1266,6 +1289,10 @@ function clearStopRequest() {
 function throwIfStopped() {
   if (stopRequested) {
     throw new Error(STOP_ERROR_MESSAGE);
+  }
+  const skippedStep = getRequestedSkipStep();
+  if (skippedStep) {
+    throw new Error(getStepSkipErrorMessage(skippedStep));
   }
 }
 
@@ -1386,6 +1413,11 @@ async function handleMessage(message, sender) {
     }
 
     case 'STEP_COMPLETE': {
+      const currentState = await getState();
+      const currentStatus = currentState.stepStatuses?.[message.step];
+      if (currentStatus === 'skipped' || skipRequestedSteps.has(message.step)) {
+        return { ok: true };
+      }
       if (stopRequested) {
         await setStepStatus(message.step, 'stopped');
         notifyStepError(message.step, STOP_ERROR_MESSAGE);
@@ -1399,6 +1431,13 @@ async function handleMessage(message, sender) {
     }
 
     case 'STEP_ERROR': {
+      const currentState = await getState();
+      const currentStatus = currentState.stepStatuses?.[message.step];
+      if (currentStatus === 'skipped' || skipRequestedSteps.has(message.step)) {
+        await setStepStatus(message.step, 'skipped');
+        notifyStepSkipped(message.step);
+        return { ok: true };
+      }
       if (isStopError(message.error)) {
         await setStepStatus(message.step, 'stopped');
         await addLog(`Step ${message.step} stopped by user`, 'warn');
@@ -1417,6 +1456,7 @@ async function handleMessage(message, sender) {
 
     case 'RESET': {
       clearStopRequest();
+      clearTransientInterruptState();
       await resetState();
       await addLog('Flow reset', 'info');
       return { ok: true };
@@ -1583,6 +1623,9 @@ async function handleStepData(step, payload) {
 
 // Map of step -> { resolve, reject } for waiting on step completion
 const stepWaiters = new Map();
+const stepInterruptHandlers = new Map();
+const skipRequestedSteps = new Set();
+const runningStepStack = [];
 let resumeWaiter = null;
 
 function waitForStepComplete(step, timeoutMs = 120000) {
@@ -1610,6 +1653,57 @@ function notifyStepError(step, error) {
   if (waiter) waiter.reject(new Error(error));
 }
 
+function notifyStepSkipped(step) {
+  const waiter = stepWaiters.get(step);
+  if (waiter) waiter.reject(new Error(getStepSkipErrorMessage(step)));
+}
+
+function registerStepInterruptHandler(step, handler) {
+  if (typeof handler === 'function') {
+    stepInterruptHandlers.set(step, handler);
+    return;
+  }
+  stepInterruptHandlers.delete(step);
+}
+
+async function interruptStep(step, reason) {
+  const handler = stepInterruptHandlers.get(step);
+  if (!handler) return;
+  stepInterruptHandlers.delete(step);
+  try {
+    await handler(reason);
+  } catch (err) {
+    console.warn(LOG_PREFIX, `Failed to interrupt step ${step}:`, err);
+  }
+}
+
+function pushRunningStep(step) {
+  runningStepStack.push(step);
+}
+
+function popRunningStep(step) {
+  const index = runningStepStack.lastIndexOf(step);
+  if (index >= 0) {
+    runningStepStack.splice(index, 1);
+  }
+}
+
+function getRequestedSkipStep() {
+  for (let index = runningStepStack.length - 1; index >= 0; index -= 1) {
+    const step = runningStepStack[index];
+    if (skipRequestedSteps.has(step)) {
+      return step;
+    }
+  }
+  return 0;
+}
+
+function clearTransientInterruptState() {
+  skipRequestedSteps.clear();
+  runningStepStack.length = 0;
+  stepInterruptHandlers.clear();
+}
+
 async function markRunningStepsStopped() {
   const state = await getState();
   const runningSteps = Object.entries(state.stepStatuses || {})
@@ -1633,6 +1727,15 @@ async function requestStop() {
 
   await addLog('Stop requested. Cancelling current operations...', 'warn');
   await broadcastStopToContentScripts();
+  const pendingInterrupts = Array.from(stepInterruptHandlers.entries());
+  for (const [step, handler] of pendingInterrupts) {
+    stepInterruptHandlers.delete(step);
+    try {
+      await handler(STOP_ERROR_MESSAGE);
+    } catch (err) {
+      console.warn(LOG_PREFIX, `Failed to stop step ${step}:`, err);
+    }
+  }
 
   for (const waiter of stepWaiters.values()) {
     waiter.reject(new Error(STOP_ERROR_MESSAGE));
@@ -1648,6 +1751,7 @@ async function requestStop() {
   autoRunActive = false;
   autoRunPausedPhase = 'stopped';
   await syncAutoRunState({ autoRunning: false });
+  clearTransientInterruptState();
   chrome.runtime.sendMessage({
     type: 'AUTO_RUN_STATUS',
     payload: { phase: 'stopped', currentRun: autoRunCurrentRun, totalRuns: autoRunTotalRuns },
@@ -1661,18 +1765,22 @@ async function requestStop() {
 async function executeStep(step) {
   console.log(LOG_PREFIX, `Executing step ${step}`);
   throwIfStopped();
+  const previousState = await getState();
+  const previousStatus = previousState.stepStatuses?.[step] || 'pending';
+  pushRunningStep(step);
+  skipRequestedSteps.delete(step);
   await setStepStatus(step, 'running');
   await addLog(`Step ${step} started`);
   await humanStepDelay();
 
-  const state = await getState();
-
-  // Set flow start time on first step
-  if (step === 1 && !state.flowStartTime) {
-    await setState({ flowStartTime: Date.now() });
-  }
-
   try {
+    const state = await getState();
+
+    // Set flow start time on first step
+    if (step === 1 && !state.flowStartTime) {
+      await setState({ flowStartTime: Date.now() });
+    }
+
     switch (step) {
       case 1: await executeStep1(state); break;
       case 2: await executeStep2(state); break;
@@ -1687,6 +1795,23 @@ async function executeStep(step) {
         throw new Error(`Unknown step: ${step}`);
     }
   } catch (err) {
+    const skippedStep = getStepSkipErrorStep(err);
+    if (skippedStep) {
+      if (skippedStep === step) {
+        const latestState = await getState();
+        if (latestState.stepStatuses?.[step] !== 'skipped') {
+          await setStepStatus(step, 'skipped');
+          await addLog(`Step ${step} skipped by user`, 'warn');
+        }
+      } else if (previousStatus !== 'running') {
+        const latestState = await getState();
+        if (latestState.stepStatuses?.[step] === 'running') {
+          await setStepStatus(step, previousStatus);
+        }
+      }
+      throw err;
+    }
+
     if (isStopError(err)) {
       await setStepStatus(step, 'stopped');
       await addLog(`Step ${step} stopped by user`, 'warn');
@@ -1695,6 +1820,9 @@ async function executeStep(step) {
     await setStepStatus(step, 'failed');
     await addLog(`Step ${step} failed: ${err.message}`, 'error');
     throw err;
+  } finally {
+    registerStepInterruptHandler(step, null);
+    popRunningStep(step);
   }
 }
 
@@ -1706,8 +1834,16 @@ async function executeStep(step) {
 async function executeStepAndWait(step, delayAfter = 2000) {
   throwIfStopped();
   const promise = waitForStepComplete(step, 120000);
-  await executeStep(step);
-  await promise;
+  try {
+    await executeStep(step);
+    await promise;
+  } catch (err) {
+    promise.catch(() => {});
+    if (isStepSkipError(err)) {
+      return { skipped: true, step: getStepSkipErrorStep(err) };
+    }
+    throw err;
+  }
   // Extra delay for page transitions / DOM updates
   if (delayAfter > 0) {
     await sleepWithStop(delayAfter + Math.floor(Math.random() * 1200));
@@ -2031,6 +2167,7 @@ async function autoRunLoop(totalRuns, options = {}) {
   }
 
   clearStopRequest();
+  clearTransientInterruptState();
   autoRunActive = true;
   autoRunTotalRuns = totalRuns;
   autoRunPausedPhase = null;
@@ -2101,6 +2238,7 @@ async function autoRunLoop(totalRuns, options = {}) {
   autoRunActive = false;
   autoRunPausedPhase = null;
   await syncAutoRunState({ autoRunning: false, autoRunPausedPhase: null });
+  clearTransientInterruptState();
   clearStopRequest();
 }
 
@@ -2922,6 +3060,7 @@ async function executeStep8(state) {
 
     const cleanup = () => {
       cleanupListener();
+      registerStepInterruptHandler(8, null);
       if (urlPollTimer) {
         clearInterval(urlPollTimer);
         urlPollTimer = null;
@@ -2954,6 +3093,13 @@ async function executeStep8(state) {
         }
       })();
     };
+
+    registerStepInterruptHandler(8, (reason) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      reject(new Error(reason || getStepSkipErrorMessage(8)));
+    });
 
     const checkSignupTabForLocalRedirect = async (source) => {
       if (!signupTabId || resolved) {
