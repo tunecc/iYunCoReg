@@ -365,7 +365,7 @@ function rowMatchesFilters(meta, senderFilters, subjectFilters) {
   return senderMatch || subjectMatch;
 }
 
-async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, ignoredMailIds = new Set()) {
+async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, ignoredMailIds = new Set(), sourceLabel = 'new-unread') {
   const unreadRows = getVisibleMailRows().filter(row => row.classList.contains('zE'));
 
   for (const row of unreadRows) {
@@ -386,7 +386,7 @@ async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, ignor
       log(`Step ${step}: Gmail delete failed for ${mailId}: ${deleteErr.message}`, 'warn');
     }
 
-    log(`Step ${step}: Code found: ${code} (new-unread, subject: ${meta.subject.slice(0, 60)})`, 'ok');
+    log(`Step ${step}: Code found: ${code} (${sourceLabel}, subject: ${meta.subject.slice(0, 60)})`, 'ok');
     return { ok: true, code, emailTimestamp: Date.now(), mailId };
   }
 
@@ -413,13 +413,13 @@ async function handlePollEmail(step, payload) {
     throw new Error('Gmail list did not load. Make sure Gmail inbox or Primary tab is open.');
   }
 
-  const existingUnreadMailIds = getCurrentUnreadMailIds();
-  log(`Step ${step}: Snapshotted ${existingUnreadMailIds.size} visible unread emails as "old"`);
-
-  let result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingUnreadMailIds);
+  let result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, new Set(), 'initial-visible-unread');
   if (result) {
     return result;
   }
+
+  const existingUnreadMailIds = getCurrentUnreadMailIds();
+  log(`Step ${step}: Snapshotted ${existingUnreadMailIds.size} visible unread emails as "old"`);
 
   const startedAt = Date.now();
   let refreshCount = 0;
@@ -429,7 +429,7 @@ async function handlePollEmail(step, payload) {
     log(`Step ${step}: No new unread Gmail yet. Refreshing inbox ${refreshCount}...`);
     await refreshInbox(refreshWaitMs);
 
-    result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingUnreadMailIds);
+    result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingUnreadMailIds, 'new-unread');
     if (result) {
       return result;
     }
