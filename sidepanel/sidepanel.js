@@ -757,7 +757,7 @@ function updateButtonStates() {
 
     if (anyRunning) {
       btn.disabled = true;
-      if (skipBtn) skipBtn.disabled = true;
+      if (skipBtn) skipBtn.disabled = currentStatus !== 'running';
     } else if (debugFreeStepExecution) {
       btn.disabled = false;
     } else if (step === 1) {
@@ -775,7 +775,7 @@ function updateButtonStates() {
     }
 
     if (skipBtn) {
-      skipBtn.disabled = !(currentStatus === 'failed' || currentStatus === 'stopped');
+      skipBtn.disabled = !(currentStatus === 'running' || currentStatus === 'failed' || currentStatus === 'stopped');
     }
   }
 
