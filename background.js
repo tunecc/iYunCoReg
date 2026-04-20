@@ -2102,6 +2102,17 @@ async function ensureAutoRunEmailReady(run, totalRuns) {
   }
 }
 
+async function pauseAutoRunAfterSkip(step, run, totalRuns) {
+  autoRunPausedPhase = 'skipped';
+  autoRunActive = false;
+  await syncAutoRunState({ autoRunning: false });
+  await addLog(`=== Run ${run}/${totalRuns} PAUSED: Step ${step} was skipped. Click Continue to resume the remaining unfinished steps. ===`, 'warn');
+  chrome.runtime.sendMessage({
+    type: 'AUTO_RUN_STATUS',
+    payload: { phase: 'skipped', currentRun: run, totalRuns, step },
+  }).catch(() => {});
+}
+
 async function executeAutoRunSteps(run, totalRuns, options = {}) {
   const { resumeFromCurrentState = false } = options;
   const state = await getState();
@@ -2121,7 +2132,11 @@ async function executeAutoRunSteps(run, totalRuns, options = {}) {
       const currentState = await getState();
       const stepStatus = currentState.stepStatuses?.[step];
       if (stepStatus === 'completed' || stepStatus === 'skipped') continue;
-      await executeStepAndWait(step, getAutoStepDelay(step));
+      const result = await executeStepAndWait(step, getAutoStepDelay(step));
+      if (result?.skipped) {
+        await pauseAutoRunAfterSkip(step, run, totalRuns);
+        return { paused: 'skipped', step };
+      }
     }
     startStep = 3;
   }
@@ -2154,8 +2169,14 @@ async function executeAutoRunSteps(run, totalRuns, options = {}) {
     if (step === 3 && !currentState.email) {
       await ensureAutoRunEmailReady(run, totalRuns);
     }
-    await executeStepAndWait(step, getAutoStepDelay(step));
+    const result = await executeStepAndWait(step, getAutoStepDelay(step));
+    if (result?.skipped) {
+      await pauseAutoRunAfterSkip(step, run, totalRuns);
+      return { paused: 'skipped', step };
+    }
   }
+
+  return { paused: null, step: 0 };
 }
 
 // Outer loop: runs the full flow N times
@@ -2203,7 +2224,11 @@ async function autoRunLoop(totalRuns, options = {}) {
       throwIfStopped();
       chrome.runtime.sendMessage(getAutoRunStatusMessage('running', run, totalRuns)).catch(() => {});
 
-      await executeAutoRunSteps(run, totalRuns, { resumeFromCurrentState: isResumingRun });
+      const autoRunResult = await executeAutoRunSteps(run, totalRuns, { resumeFromCurrentState: isResumingRun });
+      if (autoRunResult?.paused === 'skipped') {
+        clearStopRequest();
+        return;
+      }
 
       await addLog(`=== Run ${run}/${totalRuns} COMPLETE! ===`, 'ok');
 

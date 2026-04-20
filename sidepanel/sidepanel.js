@@ -190,6 +190,7 @@ const I18N = {
     statusReady: '就绪',
     autoHintEmail: '使用 Auto 生成 iCloud 别名，或手动粘贴后继续',
     autoHintError: '自动运行被错误中断。修复问题或跳过失败步骤后继续',
+    autoHintSkipped: '当前步骤已跳过。点击继续，执行后续未完成步骤',
     invalidAuthUrlFormat: '链接格式错误，请填写 CPA 或 Sub2API 链接',
     fetchedEmail: ({ email }) => `已获取 ${email}`,
     autoFetchFailed: ({ message }) => `自动获取失败：${message}`,
@@ -351,6 +352,7 @@ const I18N = {
     statusReady: 'Ready',
     autoHintEmail: 'Use Auto to generate an iCloud alias, or paste manually, then continue',
     autoHintError: 'Auto run was interrupted by an error. Fix it or skip the failed step, then continue',
+    autoHintSkipped: 'The current step was skipped. Click Continue to run the remaining unfinished steps.',
     invalidAuthUrlFormat: 'Invalid URL format. Enter a CPA or Sub2API URL.',
     fetchedEmail: ({ email }) => `Fetched ${email}`,
     autoFetchFailed: ({ message }) => `Auto fetch failed: ${message}`,
@@ -672,6 +674,12 @@ async function restoreState() {
     if (state.autoRunPausedPhase === 'waiting_email') {
       autoContinueBar.dataset.reason = 'waiting_email';
       autoHint.textContent = t('autoHintEmail');
+      autoContinueBar.style.display = 'flex';
+      btnAutoRun.disabled = false;
+      inputRunCount.disabled = false;
+    } else if (state.autoRunPausedPhase === 'skipped') {
+      autoContinueBar.dataset.reason = 'skipped';
+      autoHint.textContent = t('autoHintSkipped');
       autoContinueBar.style.display = 'flex';
       btnAutoRun.disabled = false;
       inputRunCount.disabled = false;
@@ -1777,6 +1785,15 @@ chrome.runtime.onMessage.addListener((message) => {
           btnAutoRun.disabled = false;
           inputRunCount.disabled = false;
           updateStopButtonState(true);
+          break;
+        case 'skipped':
+          autoContinueBar.dataset.reason = 'skipped';
+          autoHint.textContent = t('autoHintSkipped');
+          autoContinueBar.style.display = 'flex';
+          setAutoRunButton(t('autoRunPaused', { runLabel }));
+          btnAutoRun.disabled = false;
+          inputRunCount.disabled = false;
+          updateStopButtonState(false);
           break;
         case 'error':
           autoContinueBar.dataset.reason = 'error';
