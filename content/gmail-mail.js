@@ -66,6 +66,16 @@ function getCurrentMailIds() {
   return ids;
 }
 
+function getCurrentUnreadMailIds() {
+  const ids = new Set();
+  for (const row of getVisibleMailRows()) {
+    if (!row.classList.contains('zE')) continue;
+    const id = getMailIdFromRow(row);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -355,17 +365,13 @@ function rowMatchesFilters(meta, senderFilters, subjectFilters) {
   return senderMatch || subjectMatch;
 }
 
-async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingMailIds, useFallback, sourceLabel = '') {
-  const rows = getVisibleMailRows();
-  const orderedRows = [
-    ...rows.filter(row => row.classList.contains('zE')),
-    ...rows.filter(row => !row.classList.contains('zE')),
-  ];
+async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, ignoredMailIds = new Set()) {
+  const unreadRows = getVisibleMailRows().filter(row => row.classList.contains('zE'));
 
-  for (const row of orderedRows) {
+  for (const row of unreadRows) {
     const mailId = getMailIdFromRow(row);
     if (!mailId) continue;
-    if (!useFallback && existingMailIds.has(mailId)) continue;
+    if (ignoredMailIds.has(mailId)) continue;
 
     const meta = extractMailMeta(row);
     if (!rowMatchesFilters(meta, senderFilters, subjectFilters)) continue;
@@ -373,8 +379,6 @@ async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, exist
     const code = await extractCodeFromMailRow(row, step, meta);
     if (!code) continue;
 
-    const freshness = useFallback && existingMailIds.has(mailId) ? 'fallback-first-match' : 'new';
-    const source = sourceLabel ? `${freshness}, ${sourceLabel}` : freshness;
     try {
       await deleteGmailItem(row, mailId);
       log(`Step ${step}: Deleted Gmail item ${mailId} after extracting code`, 'ok');
@@ -382,45 +386,25 @@ async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, exist
       log(`Step ${step}: Gmail delete failed for ${mailId}: ${deleteErr.message}`, 'warn');
     }
 
-    log(`Step ${step}: Code found: ${code} (${source}, subject: ${meta.subject.slice(0, 60)})`, 'ok');
+    log(`Step ${step}: Code found: ${code} (new-unread, subject: ${meta.subject.slice(0, 60)})`, 'ok');
     return { ok: true, code, emailTimestamp: Date.now(), mailId };
   }
 
   return null;
 }
 
-async function runFinalRefreshSweep(step, senderFilters, subjectFilters, existingMailIds, intervalMs) {
-  const FINAL_REFRESH_CYCLES = 3;
-  const refreshWaitMs = Math.max(2000, Math.min(intervalMs, 5000));
+async function handlePollEmail(step, payload) {
+  const {
+    senderFilters = [],
+    subjectFilters = [],
+    intervalMs = 3000,
+  } = payload || {};
+  const pollWindowMs = 25000;
+  const refreshWaitMs = Math.max(1500, Math.min(intervalMs, 4000));
 
   log(
-    `Step ${step}: Normal polling found no matching Gmail email. Running ${FINAL_REFRESH_CYCLES} extra Refresh checks before considering resend...`,
-    'warn'
+    `Step ${step}: Starting Gmail unread-only poll (up to ${(pollWindowMs / 1000).toFixed(0)}s, refresh every ${(refreshWaitMs / 1000).toFixed(1)}s)`,
   );
-
-  for (let cycle = 1; cycle <= FINAL_REFRESH_CYCLES; cycle++) {
-    log(`Step ${step}: Final Gmail refresh sweep ${cycle}/${FINAL_REFRESH_CYCLES}`);
-    await refreshInbox(refreshWaitMs);
-    const result = await scanVisibleRowsForCode(
-      step,
-      senderFilters,
-      subjectFilters,
-      existingMailIds,
-      true,
-      `final-refresh-${cycle}`
-    );
-    if (result) {
-      return result;
-    }
-  }
-
-  return null;
-}
-
-async function handlePollEmail(step, payload) {
-  const { senderFilters, subjectFilters, maxAttempts, intervalMs } = payload;
-
-  log(`Step ${step}: Starting email poll on Gmail (max ${maxAttempts} attempts, every ${intervalMs / 1000}s)`);
 
   try {
     await waitForElement('table.F.cf.zt, tr.zA', 15000);
@@ -429,40 +413,30 @@ async function handlePollEmail(step, payload) {
     throw new Error('Gmail list did not load. Make sure Gmail inbox or Primary tab is open.');
   }
 
-  const existingMailIds = getCurrentMailIds();
-  log(`Step ${step}: Snapshotted ${existingMailIds.size} visible emails as "old"`);
+  const existingUnreadMailIds = getCurrentUnreadMailIds();
+  log(`Step ${step}: Snapshotted ${existingUnreadMailIds.size} visible unread emails as "old"`);
 
-  const FALLBACK_AFTER = 3;
+  let result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingUnreadMailIds);
+  if (result) {
+    return result;
+  }
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    log(`Polling Gmail... attempt ${attempt}/${maxAttempts}`);
+  const startedAt = Date.now();
+  let refreshCount = 0;
 
-    if (attempt > 1) {
-      await refreshInbox();
-    }
+  while (Date.now() - startedAt < pollWindowMs) {
+    refreshCount += 1;
+    log(`Step ${step}: No new unread Gmail yet. Refreshing inbox ${refreshCount}...`);
+    await refreshInbox(refreshWaitMs);
 
-    const useFallback = attempt > FALLBACK_AFTER;
-    const result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingMailIds, useFallback);
+    result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingUnreadMailIds);
     if (result) {
       return result;
     }
-
-    if (attempt === FALLBACK_AFTER + 1) {
-      log(`Step ${step}: No new Gmail emails after ${FALLBACK_AFTER} attempts, falling back to first matching email`, 'warn');
-    }
-
-    if (attempt < maxAttempts) {
-      await sleep(intervalMs);
-    }
-  }
-
-  const finalRefreshResult = await runFinalRefreshSweep(step, senderFilters, subjectFilters, existingMailIds, intervalMs);
-  if (finalRefreshResult) {
-    return finalRefreshResult;
   }
 
   throw new Error(
-    `No new matching email found on Gmail after ${(maxAttempts * intervalMs / 1000).toFixed(0)}s. ` +
-    'Check Gmail manually and make sure the inbox or Primary tab is visible.'
+    `No new unread matching email found on Gmail after ${(pollWindowMs / 1000).toFixed(0)}s. ` +
+    'Request a resend and make sure Gmail inbox or Primary tab stays visible.'
   );
 }
