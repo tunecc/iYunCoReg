@@ -323,7 +323,7 @@ function findRefreshButton() {
   return null;
 }
 
-async function refreshInbox() {
+async function refreshInbox(waitMs = 1500) {
   const refreshButton = findRefreshButton();
   if (!refreshButton) {
     throw new Error('Could not find Gmail refresh button.');
@@ -331,7 +331,7 @@ async function refreshInbox() {
 
   simulateClick(refreshButton);
   log('Gmail: Refresh clicked');
-  await sleep(1500);
+  await sleep(waitMs);
 }
 
 function extractVerificationCode(text) {
@@ -353,6 +353,68 @@ function rowMatchesFilters(meta, senderFilters, subjectFilters) {
   const senderMatch = senderFilters.some(filter => senderText.includes(String(filter || '').toLowerCase()));
   const subjectMatch = subjectFilters.some(filter => subjectText.includes(String(filter || '').toLowerCase()));
   return senderMatch || subjectMatch;
+}
+
+async function scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingMailIds, useFallback, sourceLabel = '') {
+  const rows = getVisibleMailRows();
+  const orderedRows = [
+    ...rows.filter(row => row.classList.contains('zE')),
+    ...rows.filter(row => !row.classList.contains('zE')),
+  ];
+
+  for (const row of orderedRows) {
+    const mailId = getMailIdFromRow(row);
+    if (!mailId) continue;
+    if (!useFallback && existingMailIds.has(mailId)) continue;
+
+    const meta = extractMailMeta(row);
+    if (!rowMatchesFilters(meta, senderFilters, subjectFilters)) continue;
+
+    const code = await extractCodeFromMailRow(row, step, meta);
+    if (!code) continue;
+
+    const freshness = useFallback && existingMailIds.has(mailId) ? 'fallback-first-match' : 'new';
+    const source = sourceLabel ? `${freshness}, ${sourceLabel}` : freshness;
+    try {
+      await deleteGmailItem(row, mailId);
+      log(`Step ${step}: Deleted Gmail item ${mailId} after extracting code`, 'ok');
+    } catch (deleteErr) {
+      log(`Step ${step}: Gmail delete failed for ${mailId}: ${deleteErr.message}`, 'warn');
+    }
+
+    log(`Step ${step}: Code found: ${code} (${source}, subject: ${meta.subject.slice(0, 60)})`, 'ok');
+    return { ok: true, code, emailTimestamp: Date.now(), mailId };
+  }
+
+  return null;
+}
+
+async function runFinalRefreshSweep(step, senderFilters, subjectFilters, existingMailIds, intervalMs) {
+  const FINAL_REFRESH_CYCLES = 3;
+  const refreshWaitMs = Math.max(2000, Math.min(intervalMs, 5000));
+
+  log(
+    `Step ${step}: Normal polling found no matching Gmail email. Running ${FINAL_REFRESH_CYCLES} extra Refresh checks before considering resend...`,
+    'warn'
+  );
+
+  for (let cycle = 1; cycle <= FINAL_REFRESH_CYCLES; cycle++) {
+    log(`Step ${step}: Final Gmail refresh sweep ${cycle}/${FINAL_REFRESH_CYCLES}`);
+    await refreshInbox(refreshWaitMs);
+    const result = await scanVisibleRowsForCode(
+      step,
+      senderFilters,
+      subjectFilters,
+      existingMailIds,
+      true,
+      `final-refresh-${cycle}`
+    );
+    if (result) {
+      return result;
+    }
+  }
+
+  return null;
 }
 
 async function handlePollEmail(step, payload) {
@@ -380,33 +442,9 @@ async function handlePollEmail(step, payload) {
     }
 
     const useFallback = attempt > FALLBACK_AFTER;
-    const rows = getVisibleMailRows();
-    const orderedRows = [
-      ...rows.filter(row => row.classList.contains('zE')),
-      ...rows.filter(row => !row.classList.contains('zE')),
-    ];
-
-    for (const row of orderedRows) {
-      const mailId = getMailIdFromRow(row);
-      if (!mailId) continue;
-      if (!useFallback && existingMailIds.has(mailId)) continue;
-
-      const meta = extractMailMeta(row);
-      if (!rowMatchesFilters(meta, senderFilters, subjectFilters)) continue;
-
-      const code = await extractCodeFromMailRow(row, step, meta);
-      if (!code) continue;
-
-      const source = useFallback && existingMailIds.has(mailId) ? 'fallback-first-match' : 'new';
-      try {
-        await deleteGmailItem(row, mailId);
-        log(`Step ${step}: Deleted Gmail item ${mailId} after extracting code`, 'ok');
-      } catch (deleteErr) {
-        log(`Step ${step}: Gmail delete failed for ${mailId}: ${deleteErr.message}`, 'warn');
-      }
-
-      log(`Step ${step}: Code found: ${code} (${source}, subject: ${meta.subject.slice(0, 60)})`, 'ok');
-      return { ok: true, code, emailTimestamp: Date.now(), mailId };
+    const result = await scanVisibleRowsForCode(step, senderFilters, subjectFilters, existingMailIds, useFallback);
+    if (result) {
+      return result;
     }
 
     if (attempt === FALLBACK_AFTER + 1) {
@@ -416,6 +454,11 @@ async function handlePollEmail(step, payload) {
     if (attempt < maxAttempts) {
       await sleep(intervalMs);
     }
+  }
+
+  const finalRefreshResult = await runFinalRefreshSweep(step, senderFilters, subjectFilters, existingMailIds, intervalMs);
+  if (finalRefreshResult) {
+    return finalRefreshResult;
   }
 
   throw new Error(
