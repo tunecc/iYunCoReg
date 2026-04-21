@@ -65,7 +65,7 @@
       <div class="data-row">
         <span class="data-label" data-i18n="labelCleanup">Cleanup</span>
         <label class="option-toggle" for="checkbox-auto-delete-icloud">
-          <input type="checkbox" id="checkbox-auto-delete-icloud" />
+          <input type="checkbox" id="checkbox-auto-delete-icloud" checked />
           <span data-i18n="cleanupAutoDelete">Delete iCloud alias after successful use</span>
         </label>
       </div>
@@ -177,6 +177,17 @@
     <div class="log-header">
       <span class="section-label" data-i18n="sectionIcloud">iCloud</span>
       <div class="icloud-actions">
+        <input
+          id="input-icloud-bulk-create-count"
+          class="run-count-input icloud-bulk-create-count"
+          type="number"
+          value="5"
+          min="1"
+          max="50"
+          title="批量新增数量"
+          data-i18n-title="titleIcloudBulkCreateCount"
+        />
+        <button id="btn-icloud-bulk-create" class="btn btn-primary btn-xs" type="button" data-i18n="btnIcloudBulkCreate">批量新增</button>
         <button id="btn-icloud-refresh" class="btn btn-ghost btn-xs" type="button" data-i18n="btnRefresh">Refresh</button>
         <button id="btn-icloud-delete-used" class="btn btn-outline btn-xs" type="button" data-i18n="btnDeleteUsed">Delete Used</button>
       </div>

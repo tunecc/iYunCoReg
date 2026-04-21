@@ -11,6 +11,21 @@ const ICLOUD_LOGIN_URLS = [
   'https://www.icloud.com.cn/',
   'https://www.icloud.com/',
 ];
+const ICLOUD_HIDE_MY_EMAIL_ENTRY_URLS = [
+  'https://account.apple.com/account/manage/section/privacy',
+];
+const ICLOUD_PLUS_URLS = [
+  'https://www.icloud.com.cn/icloudplus/',
+  'https://www.icloud.com/icloudplus/',
+];
+const ICLOUD_HIDE_MY_EMAIL_SCRIPT_FILES = ['icloud/content/icloud-hide-my-email.js'];
+const ICLOUD_HIDE_MY_EMAIL_SCRIPT_VERSION = '2026-04-21-8';
+const ICLOUD_UI_STEP_LABELS = {
+  1: '检测/打开隐藏邮件地址',
+  2: '点击“+”进入创建表单',
+  3: '填写标签并创建',
+  4: '返回并结束',
+};
 const STOP_ERROR_MESSAGE = 'Flow stopped by user.';
 const STEP_SKIP_ERROR_PATTERN = /^Step (\d+) skipped by user\.$/;
 const HUMAN_STEP_DELAY_MIN = 700;
@@ -40,9 +55,12 @@ const DEFAULT_STATE = {
   autoRunCurrentRun: 0,
   autoRunTotalRuns: 1,
   autoRunPausedPhase: null,
+  icloudBulkCreateStatus: 'idle',
+  icloudBulkCreateRequestedCount: 0,
+  icloudBulkCreateTabId: null,
   language: 'zh-CN',
   oauthUrl: null,
-  autoDeleteUsedIcloudAlias: false,
+  autoDeleteUsedIcloudAlias: true,
   forceRefreshOAuthBeforeStep6: false,
   allowSameStep4AndStep7Code: false,
   debugFreeStepExecution: false,
@@ -176,6 +194,28 @@ function broadcastDataUpdate(payload) {
 function broadcastIcloudAliasesChanged(payload = {}) {
   chrome.runtime.sendMessage({
     type: 'ICLOUD_ALIASES_CHANGED',
+    payload,
+  }).catch(() => {});
+}
+
+async function setIcloudBulkCreateStatus(status = 'idle', extra = {}) {
+  const payload = {
+    status,
+    requestedCount: Math.max(0, Number(extra.requestedCount) || 0),
+    tabId: Number.isFinite(Number(extra.tabId)) ? Number(extra.tabId) : null,
+    createdCount: Math.max(0, Number(extra.createdCount) || 0),
+    paused: Boolean(extra.paused),
+    error: extra.error ? String(extra.error) : '',
+  };
+
+  await setState({
+    icloudBulkCreateStatus: payload.status,
+    icloudBulkCreateRequestedCount: payload.requestedCount,
+    icloudBulkCreateTabId: payload.tabId,
+  });
+
+  chrome.runtime.sendMessage({
+    type: 'ICLOUD_BULK_CREATE_STATUS',
     payload,
   }).catch(() => {});
 }
@@ -366,6 +406,26 @@ function getIcloudSetupUrlForHost(host) {
   return '';
 }
 
+function getIcloudPlusUrlForHost(host) {
+  const normalizedHost = normalizeIcloudHost(host);
+  if (normalizedHost === 'icloud.com') return 'https://www.icloud.com/icloudplus/';
+  if (normalizedHost === 'icloud.com.cn') return 'https://www.icloud.com.cn/icloudplus/';
+  return '';
+}
+
+function isIcloudHideMyEmailAutomationUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    const host = String(parsed.host || '').toLowerCase();
+    if (host !== 'account.apple.com' && host !== 'appleid.apple.com') {
+      return false;
+    }
+    return parsed.pathname.startsWith('/account/manage/section/privacy');
+  } catch {
+    return false;
+  }
+}
+
 function getIcloudHostHintFromMessage(message) {
   const lower = String(message || '').toLowerCase();
   if (lower.includes('setup.icloud.com.cn') || lower.includes('www.icloud.com.cn') || lower.includes('icloud.com.cn')) {
@@ -449,6 +509,56 @@ async function getPreferredIcloudSetupUrls(state = null, error = null) {
   ];
 }
 
+async function getPreferredIcloudPlusUrl(error = null, state = null) {
+  const preferredLoginUrl = await getPreferredIcloudLoginUrl(error, state);
+  const preferredHost = normalizeIcloudHost(new URL(preferredLoginUrl).host);
+  return getIcloudPlusUrlForHost(preferredHost) || ICLOUD_PLUS_URLS[0];
+}
+
+async function getActiveIcloudHideMyEmailTab() {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab?.id && isIcloudHideMyEmailAutomationUrl(activeTab.url)) {
+    return activeTab;
+  }
+  return null;
+}
+
+async function openIcloudHideMyEmailEntryPage() {
+  const targetUrl = ICLOUD_HIDE_MY_EMAIL_ENTRY_URLS[0];
+  const activeTab = await getActiveIcloudHideMyEmailTab();
+  if (activeTab?.id) {
+    await chrome.tabs.update(activeTab.id, { active: true });
+    return activeTab.id;
+  }
+
+  const tabs = await chrome.tabs.query({
+    url: [
+      'https://account.apple.com/*',
+      'https://appleid.apple.com/*',
+    ],
+  });
+  const reusable = tabs.find(tab => isIcloudHideMyEmailAutomationUrl(tab.url));
+  if (reusable?.id) {
+    await chrome.tabs.update(reusable.id, { active: true });
+    return reusable.id;
+  }
+
+  const nearbyAppleTab = tabs.find(tab => tab?.id);
+  if (nearbyAppleTab?.id) {
+    await chrome.tabs.update(nearbyAppleTab.id, {
+      url: targetUrl,
+      active: true,
+    });
+    return nearbyAppleTab.id;
+  }
+
+  const created = await chrome.tabs.create({
+    url: targetUrl,
+    active: true,
+  });
+  return created.id;
+}
+
 let lastIcloudLoginPromptAt = 0;
 
 async function openIcloudLoginPage(preferredUrl) {
@@ -476,6 +586,84 @@ async function openIcloudLoginPage(preferredUrl) {
 
   const created = await chrome.tabs.create({ url: preferredUrl, active: true });
   return created.id;
+}
+
+async function waitForTabComplete(tabId, timeoutMs = 30000) {
+  const currentTab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!currentTab) {
+    throw new Error(`Tab ${tabId} no longer exists.`);
+  }
+  if (currentTab.status === 'complete') {
+    return currentTab;
+  }
+
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const cleanup = () => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+    };
+    const finishResolve = async () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve(await chrome.tabs.get(tabId).catch(() => null));
+    };
+    const finishReject = (error) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      finishReject(new Error(`Tab ${tabId} did not finish loading within ${Math.round(timeoutMs / 1000)}s.`));
+    }, timeoutMs);
+    const onUpdated = (updatedTabId, info) => {
+      if (updatedTabId === tabId && info.status === 'complete') {
+        clearTimeout(timer);
+        finishResolve();
+      }
+    };
+    const onRemoved = (removedTabId) => {
+      if (removedTabId === tabId) {
+        clearTimeout(timer);
+        finishReject(new Error(`Tab ${tabId} was closed before the iCloud+ page finished loading.`));
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+  });
+}
+
+async function pingIcloudHideMyEmailScript(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: 'HME_PING' });
+  } catch (err) {
+    if (!isBenignNavigationChannelClose(err)) {
+      console.log(LOG_PREFIX, `iCloud HME ping failed on tab ${tabId}: ${getErrorMessage(err)}`);
+    }
+    return null;
+  }
+}
+
+async function ensureIcloudHideMyEmailScript(tabId) {
+  const existing = await pingIcloudHideMyEmailScript(tabId);
+  if (existing?.ok && existing.version === ICLOUD_HIDE_MY_EMAIL_SCRIPT_VERSION) {
+    return existing;
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    files: ICLOUD_HIDE_MY_EMAIL_SCRIPT_FILES,
+  });
+  await sleepWithStop(600);
+
+  return await sendToTabWithRetry(
+    tabId,
+    { type: 'HME_PING' },
+    { timeoutMs: 5000, intervalMs: 250 }
+  );
 }
 
 async function promptIcloudLogin(error, actionLabel = 'iCloud action') {
@@ -587,8 +775,59 @@ async function resolveIcloudPremiumMailService() {
 
 function getIcloudAliasLabel() {
   const now = new Date();
-  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  return `MultiPage ${dateStr}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+}
+
+function getIcloudAliasNote() {
+  return '';
+}
+
+async function createNewIcloudAliasRecord(serviceUrl, options = {}) {
+  const {
+    setCurrentEmail = false,
+    broadcast = true,
+    label = getIcloudAliasLabel(),
+    note = getIcloudAliasNote(),
+  } = options;
+
+  const generated = await icloudRequest('POST', `${serviceUrl}/v1/hme/generate`);
+  if (!generated?.success || !generated?.result?.hme) {
+    throw new Error(generated?.error?.errorMessage || 'iCloud Hide My Email generate failed.');
+  }
+
+  const reservePayload = {
+    hme: generated.result.hme,
+    label,
+  };
+  if (note) reservePayload.note = note;
+  const reserved = await icloudRequest('POST', `${serviceUrl}/v1/hme/reserve`, {
+    data: reservePayload,
+  });
+
+  const rawReserved = reserved?.result?.hme;
+  const aliasRecord = normalizeIcloudAliasRecord(
+    rawReserved && typeof rawReserved === 'object'
+      ? rawReserved
+      : {
+          hme: typeof rawReserved === 'string' ? rawReserved : generated.result.hme,
+          label,
+          ...(note ? { note } : {}),
+        },
+    new Set()
+  );
+
+  if (!reserved?.success || !aliasRecord?.email) {
+    throw new Error(reserved?.error?.errorMessage || 'iCloud Hide My Email reserve failed.');
+  }
+
+  if (setCurrentEmail) {
+    await setEmailState(aliasRecord.email);
+  }
+  if (broadcast) {
+    broadcastIcloudAliasesChanged({ reason: 'created', email: aliasRecord.email });
+  }
+
+  return aliasRecord;
 }
 
 function findIcloudAliasArray(node, depth = 0) {
@@ -783,31 +1022,85 @@ async function fetchIcloudHideMyEmail() {
     }
 
     await addLog('iCloud: No unused active alias available, generating a new one...');
+    const createdAlias = await createNewIcloudAliasRecord(serviceUrl, {
+      setCurrentEmail: true,
+      broadcast: true,
+    });
+    await addLog(`iCloud: Reserved Hide My Email alias ${createdAlias.email}`, 'ok');
+    return createdAlias.email;
+  });
+}
 
-    const generated = await icloudRequest('POST', `${serviceUrl}/v1/hme/generate`);
-    if (!generated?.success || !generated?.result?.hme) {
-      throw new Error(generated?.error?.errorMessage || 'iCloud Hide My Email generate failed.');
-    }
+async function bulkCreateIcloudAliases(payload = {}) {
+  throwIfStopped();
 
-    const reservePayload = {
-      hme: generated.result.hme,
-      label: getIcloudAliasLabel(),
-      note: 'Generated through MultiPage Automation',
-    };
-    const reserved = await icloudRequest('POST', `${serviceUrl}/v1/hme/reserve`, {
-      data: reservePayload,
+  const requestedCount = Math.max(1, Math.min(50, Number(payload.count) || 1));
+  let tabId = null;
+
+  await addLog(`iCloud: Starting page-driven batch creation of ${requestedCount} aliases via account.apple.com privacy...`);
+  await setIcloudBulkCreateStatus('running', { requestedCount });
+
+  try {
+    tabId = await openIcloudHideMyEmailEntryPage();
+    await setIcloudBulkCreateStatus('running', { requestedCount, tabId });
+    await waitForTabComplete(tabId);
+    throwIfStopped();
+
+    const targetTab = await chrome.tabs.get(tabId).catch(() => null);
+    await addLog(`iCloud: Ready on ${targetTab?.url || 'account.apple.com privacy page'}`, 'ok');
+
+    await ensureIcloudHideMyEmailScript(tabId);
+    await addLog('iCloud: Hide My Email automation script is ready on the Apple privacy page.', 'ok');
+
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: 'HME_UI_CREATE',
+      loopCount: requestedCount,
     });
 
-    if (!reserved?.success || !reserved?.result?.hme?.hme) {
-      throw new Error(reserved?.error?.errorMessage || 'iCloud Hide My Email reserve failed.');
+    if (!response?.ok) {
+      throw new Error(response?.error || 'iCloud page automation failed.');
     }
 
-    const alias = reserved.result.hme.hme;
-    await setEmailState(alias);
-    await addLog(`iCloud: Reserved Hide My Email alias ${alias}`, 'ok');
-    broadcastIcloudAliasesChanged({ reason: 'created', email: alias });
-    return alias;
-  });
+    const created = Array.isArray(response?.created)
+      ? response.created.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    const failed = Array.isArray(response?.failed)
+      ? response.failed.map(item => ({
+          index: Number(item?.index) || 0,
+          error: getErrorMessage(item?.error || item),
+        }))
+      : [];
+    const paused = Boolean(response?.paused);
+
+    if (created.length > 0) {
+      broadcastIcloudAliasesChanged({ reason: paused ? 'bulk-paused' : 'bulk-created', count: created.length });
+    }
+
+    if (!paused && created.length === 0 && failed.length > 0) {
+      throw new Error(failed[0].error);
+    }
+
+    if (paused) {
+      await addLog(
+        created.length > 0
+          ? `iCloud: Batch creation paused. Created ${created.length}/${requestedCount} aliases before stopping.`
+          : 'iCloud: Batch creation paused on the Apple privacy page.',
+        'warn'
+      );
+      return { created, failed, requestedCount, tabId, paused: true };
+    }
+
+    await addLog(
+      failed.length > 0
+        ? `iCloud: Batch creation completed with partial success. Created ${created.length}/${requestedCount}.`
+        : `iCloud: Batch creation completed on the Apple privacy page. Created ${created.length} aliases.`,
+      failed.length > 0 ? 'warn' : 'ok'
+    );
+
+    return { created, failed, requestedCount, tabId, paused: false };
+  } finally {
+    await setIcloudBulkCreateStatus('idle');
+  }
 }
 
 async function fetchConfiguredEmail(options = {}) {
@@ -856,7 +1149,9 @@ async function resetState() {
     tabRegistry: prev.tabRegistry || {},
     language: prev.language || 'zh-CN',
     vpsUrl: prev.vpsUrl || SELF_USE_DEFAULTS.vpsUrl,
-    autoDeleteUsedIcloudAlias: Boolean(prev.autoDeleteUsedIcloudAlias),
+    autoDeleteUsedIcloudAlias: prev.autoDeleteUsedIcloudAlias !== undefined
+      ? Boolean(prev.autoDeleteUsedIcloudAlias)
+      : DEFAULT_STATE.autoDeleteUsedIcloudAlias,
     forceRefreshOAuthBeforeStep6: Boolean(prev.forceRefreshOAuthBeforeStep6),
     allowSameStep4AndStep7Code: Boolean(prev.allowSameStep4AndStep7Code),
     customPassword: prev.customPassword || '',
@@ -1546,6 +1841,63 @@ async function handleMessage(message, sender) {
       clearStopRequest();
       const aliases = await listIcloudAliases();
       return { ok: true, aliases };
+    }
+
+    case 'BULK_CREATE_ICLOUD_ALIASES': {
+      clearStopRequest();
+      const result = await bulkCreateIcloudAliases(message.payload || {});
+      return { ok: true, ...result };
+    }
+
+    case 'PAUSE_BULK_CREATE_ICLOUD_ALIASES': {
+      const state = await getState();
+      const tabId = Number(state?.icloudBulkCreateTabId) || 0;
+      if (!tabId) {
+        await setIcloudBulkCreateStatus('idle');
+        return { ok: true, paused: false };
+      }
+
+      await setIcloudBulkCreateStatus('pausing', {
+        requestedCount: state?.icloudBulkCreateRequestedCount,
+        tabId,
+      });
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: 'HME_PAUSE' });
+      } catch (_) {}
+      await addLog('iCloud: Pause requested for the current batch creation run.', 'warn');
+      return { ok: true, paused: true };
+    }
+
+    case 'HME_DEBUG': {
+      const logMessage = String(message.message || '').trim();
+      if (logMessage) {
+        await addLog(`iCloud UI: ${logMessage}`);
+      }
+      return { ok: true };
+    }
+
+    case 'HME_DEBUGGER_CLICK': {
+      const tabId = sender?.tab?.id;
+      if (!tabId) {
+        throw new Error('Debugger click failed: no sender tab found.');
+      }
+      const rect = message?.rect || {};
+      await clickWithDebugger(tabId, {
+        centerX: Number(rect.centerX),
+        centerY: Number(rect.centerY),
+      });
+      return { ok: true };
+    }
+
+    case 'FLOW_STEP': {
+      const step = Number(message.step || 0);
+      const status = String(message.status || 'idle').trim();
+      const stepLabel = ICLOUD_UI_STEP_LABELS[step] || `步骤 ${step}`;
+      const detail = String(message.error || '').trim();
+      const level = status === 'error' ? 'warn' : status === 'done' ? 'ok' : 'info';
+      const suffix = detail ? `：${detail}` : '';
+      await addLog(`iCloud UI ${stepLabel} (${status || 'idle'})${suffix}`, level);
+      return { ok: true };
     }
 
     case 'SET_ICLOUD_ALIAS_USED_STATE': {

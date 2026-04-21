@@ -424,6 +424,12 @@ header {
   gap: 6px;
 }
 
+.icloud-bulk-create-count {
+  width: 56px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 .icloud-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
