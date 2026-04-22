@@ -72,6 +72,14 @@
       ],
       "js": ["content/utils.js", "content/gmail-mail.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.icloud.com/*",
+        "https://www.icloud.com.cn/*"
+      ],
+      "js": ["content/utils.js", "content/icloud-login.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {

@@ -7,6 +7,7 @@ const SCRIPT_SOURCE = (() => {
   if (url.includes('mail.qq.com') || url.includes('exmail.qq.com')) return 'qq-mail';
   if (url.includes('mail.163.com')) return 'mail-163';
   if (url.includes('mail.google.com')) return 'gmail-mail';
+  if (url.includes('www.icloud.com') || url.includes('www.icloud.com.cn')) return 'icloud-login';
   // VPS panel — detected dynamically since URL is configurable
   return 'vps-panel';
 })();
@@ -437,6 +438,7 @@ const _isMailChildFrame = (
   || SCRIPT_SOURCE === 'gmail-mail'
   || SCRIPT_SOURCE === 'inbucket-mail'
 ) && window !== window.top;
-if (!_isMailChildFrame) {
+const _shouldAutoReportReady = !_isMailChildFrame && SCRIPT_SOURCE !== 'icloud-login';
+if (_shouldAutoReportReady) {
   reportReady();
 }
