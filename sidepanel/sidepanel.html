@@ -52,13 +52,6 @@
         </div>
       </div>
       <div class="data-row">
-        <span class="data-label" data-i18n="labelLanguage">Language</span>
-        <select id="select-language" class="data-select">
-          <option value="zh-CN">中文</option>
-          <option value="en-US">English</option>
-        </select>
-      </div>
-      <div class="data-row">
         <span class="data-label" data-i18n="labelAlias">Alias</span>
         <span class="data-value" data-i18n="icloudAliasName">iCloud Hide My Email</span>
       </div>
@@ -177,17 +170,6 @@
     <div class="log-header">
       <span class="section-label" data-i18n="sectionIcloud">iCloud</span>
       <div class="icloud-actions">
-        <input
-          id="input-icloud-bulk-create-count"
-          class="run-count-input icloud-bulk-create-count"
-          type="number"
-          value="5"
-          min="1"
-          max="50"
-          title="批量新增数量"
-          data-i18n-title="titleIcloudBulkCreateCount"
-        />
-        <button id="btn-icloud-bulk-create" class="btn btn-primary btn-xs" type="button" data-i18n="btnIcloudBulkCreate">批量新增</button>
         <button id="btn-icloud-refresh" class="btn btn-ghost btn-xs" type="button" data-i18n="btnRefresh">Refresh</button>
         <button id="btn-icloud-delete-used" class="btn btn-outline btn-xs" type="button" data-i18n="btnDeleteUsed">Delete Used</button>
       </div>
@@ -219,13 +201,54 @@
         <div class="icloud-bulk-actions">
           <button id="btn-icloud-bulk-used" class="btn btn-outline btn-xs" type="button" data-i18n="btnMarkUsed">Mark Used</button>
           <button id="btn-icloud-bulk-unused" class="btn btn-outline btn-xs" type="button" data-i18n="btnMarkUnused">Mark Unused</button>
-          <button id="btn-icloud-bulk-preserve" class="btn btn-outline btn-xs" type="button" data-i18n="btnPreserve">Preserve</button>
-          <button id="btn-icloud-bulk-unpreserve" class="btn btn-outline btn-xs" type="button" data-i18n="btnUnpreserve">Unpreserve</button>
           <button id="btn-icloud-delete-current-email" class="btn btn-outline btn-xs" type="button" data-i18n="btnDeleteCurrentEmail">删当前</button>
           <button id="btn-icloud-bulk-delete" class="btn btn-outline btn-xs" type="button" data-i18n="btnDelete">Delete</button>
         </div>
       </div>
       <div id="icloud-list" class="icloud-list"></div>
+    </div>
+  </section>
+
+  <section id="icloud-alias-automation-section">
+    <button
+      id="btn-toggle-icloud-alias-automation"
+      class="panel-toggle"
+      type="button"
+      aria-expanded="false"
+      aria-controls="icloud-alias-automation-panel"
+    >
+      <span class="section-label">iCloud 别名新增</span>
+      <span class="panel-toggle-meta">
+        <span id="icloud-alias-automation-toggle-text">点击展开</span>
+        <svg class="panel-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </span>
+    </button>
+    <div id="icloud-alias-automation-panel" class="panel-collapse" hidden>
+      <div class="icloud-alias-automation-card">
+        <div class="icloud-alias-automation-desc">使用独立 iCloud 自动化脚本在 Apple 隐私页新增 Hide My Email 别名。</div>
+        <div class="icloud-alias-automation-actions">
+          <label class="icloud-alias-automation-count">
+            <span>次数</span>
+            <input id="input-icloud-alias-loop-count" class="run-count-input" type="number" min="1" max="50" value="1" title="循环次数" />
+          </label>
+          <button id="btn-icloud-alias-open" class="btn btn-ghost btn-xs" type="button">打开 iCloud+ 功能页</button>
+          <button id="btn-icloud-alias-start" class="btn btn-primary btn-xs" type="button">开始</button>
+          <button id="btn-icloud-alias-pause" class="btn btn-outline btn-xs" type="button">暂停</button>
+          <button id="btn-icloud-alias-resume" class="btn btn-outline btn-xs" type="button">继续</button>
+        </div>
+        <div class="icloud-alias-automation-meta">
+          <div class="icloud-alias-automation-meta-row">
+            <span class="data-label">状态</span>
+            <span id="icloud-alias-automation-status" class="icloud-alias-automation-status">待命</span>
+          </div>
+          <div class="icloud-alias-automation-meta-row">
+            <span class="data-label">最新别名</span>
+            <span id="icloud-alias-automation-last-alias" class="data-value mono truncate">-</span>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
