@@ -418,16 +418,44 @@ header {
   margin-bottom: 14px;
 }
 
+.panel-toggle {
+  width: 100%;
+  padding: 0;
+  margin-bottom: 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.panel-toggle-icon {
+  transition: transform var(--transition);
+}
+
+.panel-toggle[aria-expanded="true"] .panel-toggle-icon {
+  transform: rotate(180deg);
+}
+
+.panel-collapse[hidden] {
+  display: none;
+}
+
 .icloud-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.icloud-bulk-create-count {
-  width: 56px;
-  padding-left: 6px;
-  padding-right: 6px;
 }
 
 .icloud-card {
@@ -594,6 +622,71 @@ header {
   font-size: 12px;
   color: var(--text-muted);
   text-align: center;
+}
+
+#icloud-alias-automation-section {
+  margin-bottom: 14px;
+}
+
+.icloud-alias-automation-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.icloud-alias-automation-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.icloud-alias-automation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.icloud-alias-automation-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.icloud-alias-automation-count .run-count-input {
+  width: 52px;
+}
+
+.icloud-alias-automation-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.icloud-alias-automation-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icloud-alias-automation-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.icloud-alias-automation-status.is-error {
+  color: var(--red);
+}
+
+.icloud-alias-automation-status.is-success {
+  color: var(--green);
 }
 
 /* ============================================================

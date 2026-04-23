@@ -18,7 +18,7 @@ const ICLOUD_PLUS_URLS = [
   'https://www.icloud.com.cn/icloudplus/',
   'https://www.icloud.com/icloudplus/',
 ];
-const ICLOUD_HIDE_MY_EMAIL_SCRIPT_FILES = ['icloud/content/icloud-hide-my-email.js'];
+const ICLOUD_HIDE_MY_EMAIL_SCRIPT_FILES = ['content/icloud-hide-my-email.js'];
 const ICLOUD_HIDE_MY_EMAIL_SCRIPT_VERSION = '2026-04-21-8';
 const ICLOUD_UI_STEP_LABELS = {
   1: '检测/打开隐藏邮件地址',
@@ -487,10 +487,6 @@ async function getPreferredIcloudLoginUrl(error, state = null) {
   const openHost = await getOpenIcloudHostPreference();
   if (openHost) {
     return getIcloudLoginUrlForHost(openHost);
-  }
-
-  if (currentState?.language === 'en-US') {
-    return 'https://www.icloud.com/';
   }
 
   return 'https://www.icloud.com.cn/';
@@ -1103,6 +1099,93 @@ async function bulkCreateIcloudAliases(payload = {}) {
   }
 }
 
+async function sendIcloudAliasAutomationMessage(tabId, message, timeoutMs = 35000) {
+  await ensureIcloudHideMyEmailScript(tabId);
+
+  try {
+    return await sendToTabWithRetry(tabId, message, { timeoutMs, intervalMs: 250 });
+  } catch (err) {
+    try {
+      await chrome.tabs.reload(tabId);
+      await waitForTabComplete(tabId, 15000);
+      await ensureIcloudHideMyEmailScript(tabId);
+      return await sendToTabWithRetry(tabId, message, { timeoutMs, intervalMs: 250 });
+    } catch {
+      throw err;
+    }
+  }
+}
+
+async function openIcloudAliasAutomationPage() {
+  const tabId = await openIcloudHideMyEmailEntryPage();
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  await addLog('iCloud: 已打开 Apple 隐私页，可先完成登录再开始新增。', 'info');
+  return {
+    tabId,
+    url: tab?.url || ICLOUD_HIDE_MY_EMAIL_ENTRY_URLS[0],
+  };
+}
+
+async function startIcloudAliasAutomation(payload = {}) {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!activeTab?.id) {
+    throw new Error('未找到当前活动标签页');
+  }
+  if (icloudAliasAutomationPaused) {
+    throw new Error('已暂停');
+  }
+
+  const loopCount = Math.max(1, Math.min(50, Number(payload.loopCount) || 1));
+  await addLog(`iCloud: 开始独立别名自动化（循环 ${loopCount} 次）`, 'info');
+
+  const result = await sendIcloudAliasAutomationMessage(
+    activeTab.id,
+    { type: 'HME_UI_CREATE', loopCount },
+    35000
+  );
+
+  if (!result?.ok) {
+    throw new Error(result?.error || '自动化失败');
+  }
+
+  const alias = String(result.alias || '').trim();
+  if (result?.paused) {
+    await addLog('iCloud: 独立别名自动化已暂停。', 'warn');
+    return { alias, paused: true };
+  }
+
+  await addLog(alias ? `iCloud: 独立别名自动化完成，最新别名 ${alias}` : 'iCloud: 独立别名自动化完成。', 'ok');
+  return { alias, paused: false };
+}
+
+async function pauseIcloudAliasAutomation() {
+  icloudAliasAutomationPaused = true;
+  await addLog('iCloud: 已请求暂停独立别名自动化。', 'warn');
+
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab?.id) {
+      await chrome.tabs.sendMessage(activeTab.id, { type: 'HME_PAUSE' });
+    }
+  } catch (_) {}
+
+  return { paused: true };
+}
+
+async function resumeIcloudAliasAutomation() {
+  icloudAliasAutomationPaused = false;
+  await addLog('iCloud: 已恢复独立别名自动化。', 'info');
+
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab?.id) {
+      await chrome.tabs.sendMessage(activeTab.id, { type: 'HME_RESUME' });
+    }
+  } catch (_) {}
+
+  return { resumed: true };
+}
+
 async function fetchConfiguredEmail(options = {}) {
   void options;
   return fetchIcloudHideMyEmail();
@@ -1147,7 +1230,7 @@ async function resetState() {
       ? persistentAliasState.preservedAliases
       : {},
     tabRegistry: prev.tabRegistry || {},
-    language: prev.language || 'zh-CN',
+    language: 'zh-CN',
     vpsUrl: prev.vpsUrl || SELF_USE_DEFAULTS.vpsUrl,
     autoDeleteUsedIcloudAlias: prev.autoDeleteUsedIcloudAlias !== undefined
       ? Boolean(prev.autoDeleteUsedIcloudAlias)
@@ -1671,6 +1754,7 @@ async function broadcastStopToContentScripts() {
 }
 
 let stopRequested = false;
+let icloudAliasAutomationPaused = false;
 
 // ============================================================
 // Message Handler (central router)
@@ -1801,7 +1885,7 @@ async function handleMessage(message, sender) {
 
     case 'SAVE_SETTING': {
       const updates = {};
-      if (message.payload.language !== undefined) updates.language = message.payload.language;
+      if (message.payload.language !== undefined) updates.language = 'zh-CN';
       if (message.payload.vpsUrl !== undefined) updates.vpsUrl = message.payload.vpsUrl;
       if (message.payload.autoDeleteUsedIcloudAlias !== undefined) updates.autoDeleteUsedIcloudAlias = Boolean(message.payload.autoDeleteUsedIcloudAlias);
       if (message.payload.forceRefreshOAuthBeforeStep6 !== undefined) updates.forceRefreshOAuthBeforeStep6 = Boolean(message.payload.forceRefreshOAuthBeforeStep6);
@@ -1835,6 +1919,36 @@ async function handleMessage(message, sender) {
     case 'CHECK_ICLOUD_SESSION': {
       clearStopRequest();
       return await checkIcloudSession();
+    }
+
+    case 'OPEN_LOGIN': {
+      const result = await openIcloudAliasAutomationPage();
+      return { ok: true, ...result };
+    }
+
+    case 'START_AUTOMATION': {
+      const result = await startIcloudAliasAutomation(message.payload || {});
+      return { ok: true, ...result };
+    }
+
+    case 'PAUSE_AUTOMATION': {
+      const result = await pauseIcloudAliasAutomation();
+      return { ok: true, ...result };
+    }
+
+    case 'RESUME_AUTOMATION': {
+      const result = await resumeIcloudAliasAutomation();
+      return { ok: true, ...result };
+    }
+
+    case 'OPEN_ICLOUD_HIDE_MY_EMAIL_ENTRY_PAGE': {
+      const tabId = await openIcloudHideMyEmailEntryPage();
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      return {
+        ok: true,
+        tabId,
+        url: tab?.url || ICLOUD_HIDE_MY_EMAIL_ENTRY_URLS[0],
+      };
     }
 
     case 'LIST_ICLOUD_ALIASES': {
