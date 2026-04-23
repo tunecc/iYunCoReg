@@ -35,7 +35,6 @@ const icloudAliasAutomationStatus = document.getElementById('icloud-alias-automa
 const icloudAliasAutomationLastAlias = document.getElementById('icloud-alias-automation-last-alias');
 const checkboxAutoDeleteIcloud = document.getElementById('checkbox-auto-delete-icloud');
 const checkboxForceRefreshOAuthBeforeStep6 = document.getElementById('checkbox-force-refresh-oauth-before-step6');
-const checkboxAllowSameStep4AndStep7Code = document.getElementById('checkbox-allow-same-step4-step7-code');
 const checkboxDebugFreeStepExecution = document.getElementById('checkbox-debug-free-step-execution');
 const inputIcloudSearch = document.getElementById('input-icloud-search');
 const selectIcloudFilter = document.getElementById('select-icloud-filter');
@@ -133,7 +132,6 @@ const I18N = {
     labelCleanup: '清理',
     labelIcloudHost: 'iCloud',
     labelStep6: '第 6 步',
-    labelCodeRule: '验证码',
     labelDebug: '调试',
     labelVerify: '验证',
     labelQqDomain: 'QQ 域名',
@@ -151,7 +149,6 @@ const I18N = {
     icloudHostCn: 'iCloud.com.cn',
     cleanupAutoDelete: '成功使用后自动删除 iCloud 别名',
     step6ForceRefresh: '每次执行第 6 步前强制重新获取 OAuth',
-    allowSameStep4AndStep7Code: '允许第 4 步和第 7 步使用相同验证码',
     debugFreeStepExecution: '允许自由执行任意 Step',
     mailProvider163: '163 邮箱 (mail.163.com)',
     mailProviderQq: 'QQ 邮箱',
@@ -315,7 +312,6 @@ const I18N = {
     labelCleanup: 'Cleanup',
     labelIcloudHost: 'iCloud',
     labelStep6: 'Step 6',
-    labelCodeRule: 'Code',
     labelDebug: 'Debug',
     labelVerify: 'Verify',
     labelQqDomain: 'QQ Domain',
@@ -333,7 +329,6 @@ const I18N = {
     icloudHostCn: 'iCloud.com.cn',
     cleanupAutoDelete: 'Delete iCloud alias after successful use',
     step6ForceRefresh: 'Force refresh OAuth before every Step 6 run',
-    allowSameStep4AndStep7Code: 'Allow the same code for Step 4 and Step 7',
     debugFreeStepExecution: 'Allow free execution of any step',
     mailProvider163: '163 Mail (mail.163.com)',
     mailProviderQq: 'QQ Mail',
@@ -700,7 +695,6 @@ async function restoreState() {
     }
     checkboxAutoDeleteIcloud.checked = Boolean(state.autoDeleteUsedIcloudAlias);
     checkboxForceRefreshOAuthBeforeStep6.checked = Boolean(state.forceRefreshOAuthBeforeStep6);
-    checkboxAllowSameStep4AndStep7Code.checked = Boolean(state.allowSameStep4AndStep7Code);
     checkboxDebugFreeStepExecution.checked = Boolean(state.debugFreeStepExecution);
     selectIcloudHostPreference.value = state.icloudHostPreference || 'auto';
     if (state.mailProvider) {
@@ -1812,14 +1806,6 @@ checkboxForceRefreshOAuthBeforeStep6.addEventListener('change', async () => {
     type: 'SAVE_SETTING',
     source: 'sidepanel',
     payload: { forceRefreshOAuthBeforeStep6: checkboxForceRefreshOAuthBeforeStep6.checked },
-  });
-});
-
-checkboxAllowSameStep4AndStep7Code.addEventListener('change', async () => {
-  await chrome.runtime.sendMessage({
-    type: 'SAVE_SETTING',
-    source: 'sidepanel',
-    payload: { allowSameStep4AndStep7Code: checkboxAllowSameStep4AndStep7Code.checked },
   });
 });
 
