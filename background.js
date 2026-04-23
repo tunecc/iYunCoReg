@@ -62,7 +62,6 @@ const DEFAULT_STATE = {
   oauthUrl: null,
   autoDeleteUsedIcloudAlias: true,
   forceRefreshOAuthBeforeStep6: false,
-  allowSameStep4AndStep7Code: false,
   debugFreeStepExecution: false,
   email: null,
   password: null,
@@ -1203,7 +1202,6 @@ async function resetState() {
       'vpsUrl',
       'autoDeleteUsedIcloudAlias',
       'forceRefreshOAuthBeforeStep6',
-      'allowSameStep4AndStep7Code',
       'customPassword',
       'icloudHostPreference',
       'preferredIcloudHost',
@@ -1236,7 +1234,6 @@ async function resetState() {
       ? Boolean(prev.autoDeleteUsedIcloudAlias)
       : DEFAULT_STATE.autoDeleteUsedIcloudAlias,
     forceRefreshOAuthBeforeStep6: Boolean(prev.forceRefreshOAuthBeforeStep6),
-    allowSameStep4AndStep7Code: Boolean(prev.allowSameStep4AndStep7Code),
     customPassword: prev.customPassword || '',
     icloudHostPreference: prev.icloudHostPreference || SELF_USE_DEFAULTS.icloudHostPreference,
     preferredIcloudHost: prev.preferredIcloudHost || '',
@@ -1889,7 +1886,6 @@ async function handleMessage(message, sender) {
       if (message.payload.vpsUrl !== undefined) updates.vpsUrl = message.payload.vpsUrl;
       if (message.payload.autoDeleteUsedIcloudAlias !== undefined) updates.autoDeleteUsedIcloudAlias = Boolean(message.payload.autoDeleteUsedIcloudAlias);
       if (message.payload.forceRefreshOAuthBeforeStep6 !== undefined) updates.forceRefreshOAuthBeforeStep6 = Boolean(message.payload.forceRefreshOAuthBeforeStep6);
-      if (message.payload.allowSameStep4AndStep7Code !== undefined) updates.allowSameStep4AndStep7Code = Boolean(message.payload.allowSameStep4AndStep7Code);
       if (message.payload.debugFreeStepExecution !== undefined) updates.debugFreeStepExecution = Boolean(message.payload.debugFreeStepExecution);
       if (message.payload.customPassword !== undefined) updates.customPassword = message.payload.customPassword;
       if (message.payload.icloudHostPreference !== undefined) updates.icloudHostPreference = message.payload.icloudHostPreference;
@@ -3092,7 +3088,6 @@ async function pollVerificationCodeWithAutoResend(options) {
       const latestState = await getState();
       if (
         step === 7 &&
-        !latestState.allowSameStep4AndStep7Code &&
         latestState.lastSignupVerificationCode &&
         result.code === latestState.lastSignupVerificationCode
       ) {
