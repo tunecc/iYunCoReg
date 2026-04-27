@@ -42,7 +42,6 @@ const checkboxIcloudSelectAll = document.getElementById('checkbox-icloud-select-
 const icloudSelectionSummary = document.getElementById('icloud-selection-summary');
 const btnIcloudBulkUsed = document.getElementById('btn-icloud-bulk-used');
 const btnIcloudBulkUnused = document.getElementById('btn-icloud-bulk-unused');
-const btnIcloudDeleteCurrentEmail = document.getElementById('btn-icloud-delete-current-email');
 const btnIcloudBulkDelete = document.getElementById('btn-icloud-bulk-delete');
 const rowMailProvider = document.getElementById('row-mail-provider');
 const inputEmail = document.getElementById('input-email');
@@ -79,8 +78,8 @@ const inputRunCount = document.getElementById('input-run-count');
 const autoHint = document.getElementById('auto-hint');
 const FORCED_LANGUAGE = 'zh-CN';
 const ICLOUD_ALIAS_AUTOMATION_TEXT = Object.freeze({
-  expand: '点击展开',
-  collapse: '点击收起',
+  expand: '展开',
+  collapse: '收起',
   idle: '待命',
   opening: '正在打开 Apple 隐私页...',
   opened: '已打开 Apple 隐私页',
@@ -177,8 +176,7 @@ const I18N = {
     btnIcloudBulkCreate: '批量新增',
     btnIcloudBulkPause: '暂停新增',
     btnIcloudBulkPausing: '暂停中...',
-    btnDeleteUsed: '删除已用',
-    btnDeleteCurrentEmail: '删当前',
+    btnDeleteUsed: '删已用',
     btnDelete: '删除',
     btnMarkUsed: '标记已用',
     btnMarkUnused: '标记未用',
@@ -189,6 +187,10 @@ const I18N = {
     icloudFilterUsed: '已用',
     icloudFilterUnused: '未用',
     icloudFilterPreserved: '保留',
+    icloudMetaTime: '时间',
+    icloudMetaCreated: '创建',
+    icloudMetaLabel: '标签',
+    icloudMetaNote: '备注',
     btnIcloudLoginDone: '我已登录',
     btnClear: '清空',
     btnSkip: '跳过',
@@ -216,8 +218,6 @@ const I18N = {
     autoHintEmail: '使用 Auto 生成 iCloud 别名，或手动粘贴后继续',
     autoHintError: '自动运行被错误中断。修复问题或跳过失败步骤后继续',
     autoHintSkipped: '当前步骤已跳过。点击继续，执行后续未完成步骤',
-    currentEmailEmpty: '当前邮箱为空，无法删除',
-    currentEmailAliasNotFound: ({ email }) => `当前邮箱 ${email} 不在 iCloud 别名列表中`,
     invalidAuthUrlFormat: '链接格式错误，请填写 CPA 或 Sub2API 链接',
     fetchedEmail: ({ email }) => `已获取 ${email}`,
     autoFetchFailed: ({ message }) => `自动获取失败：${message}`,
@@ -357,8 +357,7 @@ const I18N = {
     btnIcloudBulkCreate: 'Create Batch',
     btnIcloudBulkPause: 'Pause Batch',
     btnIcloudBulkPausing: 'Pausing...',
-    btnDeleteUsed: 'Delete Used',
-    btnDeleteCurrentEmail: 'Delete Current',
+    btnDeleteUsed: 'Del Used',
     btnDelete: 'Delete',
     btnMarkUsed: 'Mark Used',
     btnMarkUnused: 'Mark Unused',
@@ -369,6 +368,10 @@ const I18N = {
     icloudFilterUsed: 'Used',
     icloudFilterUnused: 'Unused',
     icloudFilterPreserved: 'Preserved',
+    icloudMetaTime: 'Time',
+    icloudMetaCreated: 'Created',
+    icloudMetaLabel: 'Label',
+    icloudMetaNote: 'Note',
     btnIcloudLoginDone: "I've Signed In",
     btnClear: 'Clear',
     btnSkip: 'Skip',
@@ -396,8 +399,6 @@ const I18N = {
     autoHintEmail: 'Use Auto to generate an iCloud alias, or paste manually, then continue',
     autoHintError: 'Auto run was interrupted by an error. Fix it or skip the failed step, then continue',
     autoHintSkipped: 'The current step was skipped. Click Continue to run the remaining unfinished steps.',
-    currentEmailEmpty: 'Current email is empty and cannot be deleted.',
-    currentEmailAliasNotFound: ({ email }) => `Current email ${email} was not found in the iCloud alias list.`,
     invalidAuthUrlFormat: 'Invalid URL format. Enter a CPA or Sub2API URL.',
     fetchedEmail: ({ email }) => `Fetched ${email}`,
     autoFetchFailed: ({ message }) => `Auto fetch failed: ${message}`,
@@ -927,6 +928,71 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function formatLocalDateTime(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-') + ` ${
+    String(date.getHours()).padStart(2, '0')
+  }:${
+    String(date.getMinutes()).padStart(2, '0')
+  }:${
+    String(date.getSeconds()).padStart(2, '0')
+  }`;
+}
+
+function formatIcloudAliasDateTime(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(raw)) {
+    return raw.replace('T', ' ');
+  }
+
+  let parsed = null;
+  if (/^\d{13}$/.test(raw)) {
+    parsed = new Date(Number(raw));
+  } else if (/^\d{10}$/.test(raw)) {
+    parsed = new Date(Number(raw) * 1000);
+  } else {
+    parsed = new Date(raw);
+  }
+
+  if (Number.isNaN(parsed.getTime())) return '';
+  return formatLocalDateTime(parsed);
+}
+
+function buildIcloudAliasDetailsHtml(alias) {
+  const details = [];
+  const labelTime = formatIcloudAliasDateTime(alias.label);
+  const createdTime = labelTime ? '' : formatIcloudAliasDateTime(alias.createdAt);
+  const labelText = String(alias.label || '').trim();
+  const noteText = String(alias.note || '').trim();
+
+  if (labelTime) {
+    details.push({ label: t('icloudMetaNote'), value: labelTime, mono: true });
+  } else if (createdTime) {
+    details.push({ label: t('icloudMetaCreated'), value: createdTime, mono: true });
+  }
+
+  if (labelText && !labelTime) {
+    details.push({ label: t('icloudMetaLabel'), value: labelText, mono: false });
+  }
+
+  if (noteText) {
+    details.push({ label: t('icloudMetaNote'), value: noteText, mono: false });
+  }
+
+  if (!details.length) return '';
+
+  return details.map((detail) => `
+    <div class="icloud-item-detail">
+      <span class="icloud-item-detail-label">${escapeHtml(detail.label)}</span>
+      <span class="icloud-item-detail-value${detail.mono ? ' mono' : ''}">${escapeHtml(detail.value)}</span>
+    </div>
+  `).join('');
+}
+
 function normalizeIcloudSearchText(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -969,6 +1035,7 @@ function updateIcloudBulkUI(visibleAliases = getFilteredIcloudAliases()) {
   const visibleEmails = visibleAliases.map(alias => alias.email);
   const selectedVisibleCount = visibleEmails.filter(email => icloudSelectedEmails.has(email)).length;
   const hasVisible = visibleEmails.length > 0;
+  const deletableUsedCount = lastRenderedIcloudAliases.filter(alias => alias.used && !alias.preserved).length;
 
   checkboxIcloudSelectAll.checked = hasVisible && selectedVisibleCount === visibleEmails.length;
   checkboxIcloudSelectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleEmails.length;
@@ -981,8 +1048,8 @@ function updateIcloudBulkUI(visibleAliases = getFilteredIcloudAliases()) {
   const hasSelection = icloudSelectedEmails.size > 0;
   btnIcloudBulkUsed.disabled = !hasSelection;
   btnIcloudBulkUnused.disabled = !hasSelection;
-  btnIcloudDeleteCurrentEmail.disabled = !inputEmail.value.trim();
   btnIcloudBulkDelete.disabled = !hasSelection;
+  btnIcloudDeleteUsed.disabled = icloudPanelLoading || deletableUsedCount === 0;
 }
 
 function setIcloudAliasAutomationExpanded(expanded) {
@@ -1063,7 +1130,6 @@ function setIcloudLoadingState(loading, summary = '') {
   checkboxIcloudSelectAll.disabled = loading || visibleAliases.length === 0;
   btnIcloudBulkUsed.disabled = loading || icloudSelectedEmails.size === 0;
   btnIcloudBulkUnused.disabled = loading || icloudSelectedEmails.size === 0;
-  btnIcloudDeleteCurrentEmail.disabled = loading || !inputEmail.value.trim();
   btnIcloudBulkDelete.disabled = loading || icloudSelectedEmails.size === 0;
   if (summary) icloudSummary.textContent = summary;
 }
@@ -1130,22 +1196,25 @@ function renderIcloudAliases(aliases = []) {
   for (const alias of visibleAliases) {
     const item = document.createElement('div');
     item.className = 'icloud-item';
+    const statusTags = [
+      alias.used ? `<span class="icloud-tag used">${escapeHtml(currentLanguage === 'zh-CN' ? '已用' : 'Used')}</span>` : '',
+      !alias.used && alias.active ? `<span class="icloud-tag active">${escapeHtml(currentLanguage === 'zh-CN' ? '可用' : 'Active')}</span>` : '',
+      alias.preserved ? `<span class="icloud-tag">${escapeHtml(currentLanguage === 'zh-CN' ? '保留' : 'Preserved')}</span>` : '',
+    ].filter(Boolean).join('');
+    const detailsHtml = buildIcloudAliasDetailsHtml(alias);
     item.innerHTML = `
       <input class="icloud-item-check" type="checkbox" data-action="select" ${icloudSelectedEmails.has(alias.email) ? 'checked' : ''} />
       <div class="icloud-item-main">
-        <div class="icloud-item-email">${escapeHtml(alias.email)}</div>
-        <div class="icloud-item-meta">
-          ${alias.used ? `<span class="icloud-tag used">${escapeHtml(currentLanguage === 'zh-CN' ? '已用' : 'Used')}</span>` : ''}
-          ${!alias.used && alias.active ? `<span class="icloud-tag active">${escapeHtml(currentLanguage === 'zh-CN' ? '可用' : 'Active')}</span>` : ''}
-          ${alias.preserved ? `<span class="icloud-tag">${escapeHtml(currentLanguage === 'zh-CN' ? '保留' : 'Preserved')}</span>` : ''}
-          ${alias.label ? `<span class="icloud-tag">${escapeHtml(alias.label)}</span>` : ''}
-          ${alias.note ? `<span class="icloud-tag">${escapeHtml(alias.note)}</span>` : ''}
+        <div class="icloud-item-head">
+          <div class="icloud-item-email">${escapeHtml(alias.email)}</div>
+          ${statusTags ? `<div class="icloud-item-badges">${statusTags}</div>` : ''}
         </div>
+        ${detailsHtml ? `<div class="icloud-item-details">${detailsHtml}</div>` : ''}
       </div>
       <div class="icloud-item-actions">
         <button class="btn btn-outline btn-xs" type="button" data-action="toggle-used">${escapeHtml(alias.used ? t('btnMarkUnused') : t('btnMarkUsed'))}</button>
         <button class="btn btn-outline btn-xs" type="button" data-action="toggle-preserved">${escapeHtml(alias.preserved ? t('btnUnpreserve') : t('btnPreserve'))}</button>
-        <button class="btn btn-outline btn-xs" type="button" data-action="delete">${escapeHtml(t('btnDelete'))}</button>
+        <button class="btn btn-outline btn-outline-danger btn-xs" type="button" data-action="delete">${escapeHtml(t('btnDelete'))}</button>
       </div>
     `;
 
@@ -1376,58 +1445,6 @@ async function deleteUsedIcloudAliases() {
   }
 }
 
-async function findAliasByEmail(email, options = {}) {
-  const normalizedEmail = String(email || '').trim();
-  if (!normalizedEmail) return null;
-
-  const findInRenderedAliases = () => lastRenderedIcloudAliases.find(
-    alias => String(alias?.email || '').trim() === normalizedEmail
-  ) || null;
-
-  let alias = findInRenderedAliases();
-  if (alias || options.skipRefresh) {
-    return alias;
-  }
-
-  await refreshIcloudAliases({ silent: true });
-  return findInRenderedAliases();
-}
-
-async function deleteCurrentFilledIcloudAlias() {
-  const email = inputEmail.value.trim();
-  if (!email) {
-    showToast(t('currentEmailEmpty'), 'warn');
-    return;
-  }
-
-  try {
-    const alias = await findAliasByEmail(email);
-    if (!alias) {
-      throw new Error(t('currentEmailAliasNotFound', { email }));
-    }
-
-    const deleted = await deleteSingleIcloudAlias(alias);
-    if (!deleted) {
-      return;
-    }
-
-    if (inputEmail.value.trim() === alias.email) {
-      inputEmail.value = '';
-      await chrome.runtime.sendMessage({
-        type: 'SAVE_EMAIL',
-        source: 'sidepanel',
-        payload: { email: '' },
-      });
-    }
-
-    icloudSelectedEmails.delete(alias.email);
-    updateIcloudBulkUI();
-  } catch (err) {
-    showToast(t('deleteFailed', { message: err.message }), 'error');
-    icloudSummary.textContent = err.message;
-  }
-}
-
 function syncPasswordToggleLabel() {
   btnTogglePassword.textContent = inputPassword.type === 'password' ? t('btnShow') : t('btnHide');
 }
@@ -1506,10 +1523,6 @@ btnIcloudRefresh.addEventListener('click', async () => {
 
 btnIcloudDeleteUsed.addEventListener('click', async () => {
   await deleteUsedIcloudAliases();
-});
-
-btnIcloudDeleteCurrentEmail.addEventListener('click', async () => {
-  await deleteCurrentFilledIcloudAlias();
 });
 
 inputIcloudSearch.addEventListener('input', () => {

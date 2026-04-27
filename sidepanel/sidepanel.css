@@ -218,6 +218,16 @@ header {
 }
 .btn-outline:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); }
 
+.btn-outline-danger {
+  color: var(--red);
+  border-color: rgba(220, 38, 38, 0.22);
+}
+.btn-outline-danger:hover {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-soft);
+}
+
 .btn-sm { padding: 5px 12px; font-size: 12px; }
 .btn-xs { padding: 4px 10px; font-size: 11px; }
 
@@ -420,16 +430,44 @@ header {
 
 .panel-toggle {
   width: 100%;
-  padding: 0;
+  padding: 10px 12px;
   margin-bottom: 8px;
-  border: none;
-  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
   color: inherit;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+}
+
+.panel-toggle:hover {
+  border-color: var(--blue);
+  background: var(--bg-base);
+}
+
+.panel-toggle-title-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.panel-toggle-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.panel-toggle-subtitle {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 .panel-toggle-meta {
@@ -438,6 +476,11 @@ header {
   gap: 6px;
   font-size: 12px;
   color: var(--text-secondary);
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
 }
 
 .panel-toggle-icon {
@@ -519,9 +562,9 @@ header {
 
 .icloud-bulkbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px 10px;
   margin-bottom: 10px;
   padding: 8px 10px;
   border: 1px solid var(--border-subtle);
@@ -530,36 +573,43 @@ header {
 }
 
 .icloud-select-all {
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  margin-right: auto;
 }
 
 .icloud-bulk-actions {
   display: flex;
+  flex: 1 1 220px;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
 }
 
+.icloud-bulk-actions .btn {
+  padding-inline: 8px;
+}
+
 .icloud-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 220px;
+  gap: 8px;
+  max-height: min(360px, 42vh);
   overflow-y: auto;
 }
 
 .icloud-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 8px 10px;
+  padding: 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--bg-base);
 }
 
 .icloud-item-check {
-  margin-top: 2px;
+  margin-top: 3px;
   width: 15px;
   height: 15px;
   accent-color: var(--blue);
@@ -567,38 +617,86 @@ header {
 }
 
 .icloud-item-main {
-  flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.icloud-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+}
+
+.icloud-item-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .icloud-item-actions {
+  grid-column: 2;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  flex-shrink: 0;
+}
+
+.icloud-item-actions .btn {
+  padding: 3px 8px;
 }
 
 .icloud-item-email {
+  flex: 1 1 220px;
   font-family: 'JetBrains Mono', 'Consolas', monospace;
   font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
   color: var(--text-primary);
   word-break: break-all;
 }
 
-.icloud-item-meta {
-  margin-top: 3px;
+.icloud-item-details {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.icloud-item-detail {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
   font-size: 11px;
+  line-height: 1.45;
+}
+
+.icloud-item-detail-label {
+  width: 34px;
+  flex-shrink: 0;
   color: var(--text-muted);
+}
+
+.icloud-item-detail-value {
+  min-width: 0;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.icloud-item-detail-value.mono {
+  font-size: 11px;
+  color: var(--text-primary);
 }
 
 .icloud-tag {
   display: inline-flex;
   align-items: center;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 999px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
@@ -632,8 +730,14 @@ header {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 12px;
   box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.icloud-alias-automation-top {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -645,48 +749,113 @@ header {
   color: var(--text-secondary);
 }
 
-.icloud-alias-automation-actions {
+.icloud-alias-automation-quick-meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
+.icloud-alias-automation-actions {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.icloud-alias-automation-status-inline,
 .icloud-alias-automation-count {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.icloud-alias-automation-count .run-count-input {
-  width: 52px;
+.icloud-alias-automation-count-label {
+  white-space: nowrap;
 }
 
-.icloud-alias-automation-meta {
+.icloud-alias-automation-count .run-count-input {
+  width: 74px;
+  min-width: 74px;
+  padding-inline: 6px;
+  font-size: 14px;
+}
+
+.icloud-alias-automation-run-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.icloud-alias-automation-run-actions .btn,
+#btn-icloud-alias-open {
+  justify-content: center;
+}
+
+.icloud-alias-automation-meta-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.icloud-alias-automation-meta-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
 }
 
-.icloud-alias-automation-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.icloud-alias-automation-meta-card-wide {
+  grid-column: 1 / -1;
+}
+
+.icloud-alias-automation-meta-label {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .icloud-alias-automation-status {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
 .icloud-alias-automation-status.is-error {
   color: var(--red);
+  background: var(--red-soft);
+  border-color: rgba(220, 38, 38, 0.18);
 }
 
 .icloud-alias-automation-status.is-success {
   color: var(--green);
+  background: var(--green-soft);
+  border-color: rgba(22, 163, 74, 0.18);
+}
+
+.icloud-alias-automation-last-alias {
+  display: block;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  word-break: break-all;
 }
 
 /* ============================================================
