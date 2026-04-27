@@ -60,7 +60,7 @@ const DEFAULT_STATE = {
   icloudBulkCreateTabId: null,
   language: 'zh-CN',
   oauthUrl: null,
-  autoDeleteUsedIcloudAlias: true,
+  autoDeleteUsedIcloudAlias: false,
   forceRefreshOAuthBeforeStep6: false,
   debugFreeStepExecution: false,
   email: null,
